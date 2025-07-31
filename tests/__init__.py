@@ -1,0 +1,3 @@
+"""
+Tests para RAG Benchmark
+"""
