@@ -19,6 +19,7 @@ weaviate-client
 # Data processing
 pandas
 numpy
+PyPDF2
 # scikit-learn
 
 # Text processing and embeddings
