@@ -1,0 +1,5 @@
+id,question,ground_truth,llm_answer,question_length,ground_truth_length,answer_length,num_contexts,faithfulness,answer_relevancy,context_precision,context_recall,average_score,execution_time_seconds,input_tokens,output_tokens,embedding_tokens,total_tokens,total_cost_usd,cost_per_token,answer_vs_truth_ratio
+1,¿En qué momento y quien debe reevaluar el riesgo clínico de una paciente con embarazo de curso normal?,El Ginecobstetra en la semana 28 - 30 y semana 34 – 36.,"1. La reevaluación del riesgo clínico en una paciente con embarazo de curso normal debe realizarse durante el control prenatal. 
+
+2. Según el Document...",102,55,1088,8,1.0,0.0,0.31,0.0,0.327,14.148,1766,406,0,2172,0.006119,2.82e-06,19.78
+4,¿Cuál es la cantidad ideal de controles prenatales?,se recomienda un programa de diez citas. Para una mujer multípara con un embarazo de curso normal se recomienda un programa de siete citas,La cantidad ideal de controles prenatales para una gestante con embarazo de curso normal no se especifica directamente en los Documentos 1 y 2. Sin em...,51,138,586,8,1.0,0.0,0.7,0.0,0.425,5.831,1680,256,0,1936,0.00487,2.52e-06,4.25

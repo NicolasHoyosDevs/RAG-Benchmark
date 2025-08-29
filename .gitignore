@@ -55,8 +55,8 @@ Data/graphs/*
 !Data/graphs/.gitkeep
 
 # Results
-results/*
-!results/.gitkeep
+# results/*
+# !results/.gitkeep
 
 # Logs
 logs/
