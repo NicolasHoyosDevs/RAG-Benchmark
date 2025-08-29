@@ -24,44 +24,38 @@ load_dotenv(dotenv_path=ENV_PATH)
 if not os.getenv("OPENAI_API_KEY"):
     raise ValueError("OPENAI_API_KEY no encontrada en el archivo .env")
 
+# Definir rutas y configuraciones
+script_dir = Path(__file__).resolve().parent
+chroma_db_dir = script_dir.parent / "Data" / "embeddings" / "chroma_db"
+collection_name = "guia_embarazo_parto"
 
-class SimpleSemanticRAG:
-    """Simple semantic RAG using only ChromaDB for retrieval."""
+# Configurar modelos
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
 
-    def __init__(self):
-        # Rutas y nombres
-        self.script_dir = Path(__file__).resolve().parent
-        self.chroma_db_dir = self.script_dir.parent / "Data" / "embeddings" / "chroma_db"
-        self.collection_name = "guia_embarazo_parto"
+# Cargar ChromaDB
+vectorstore = Chroma(
+    persist_directory=str(chroma_db_dir),
+    embedding_function=embeddings,
+    collection_name=collection_name,
+)
 
-        # Modelos
-        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        self.llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
+# Configurar retriever semántico
+retriever = vectorstore.as_retriever(
+    search_kwargs={"k": 5}
+)
 
-        # Cargar ChromaDB
-        self.vectorstore = Chroma(
-            persist_directory=str(self.chroma_db_dir),
-            embedding_function=self.embeddings,
-            collection_name=self.collection_name,
-        )
+print("✅ Sistema RAG semántico simple inicializado.")
+print(f"   📄 Documentos en base de datos: {vectorstore._collection.count()}")
 
-        # Retriever semántico
-        self.retriever = self.vectorstore.as_retriever(
-            search_kwargs={"k": 5}
-        )
-
-        print("✅ Sistema RAG semántico simple inicializado.")
-        print(
-            f"   📄 Documentos en base de datos: {self.vectorstore._collection.count()}")
-
-    def search(self, query: str) -> List[Document]:
-        """Realiza una búsqueda semántica usando ChromaDB."""
-        print(f"Consultando: '{query}'")
-        return self.retriever.invoke(query)
+# Función simple de búsqueda
 
 
-# ----------------------------- Cadena RAG ----------------------------- #
-_instance = SimpleSemanticRAG()
+def search(query: str) -> List[Document]:
+    """Realiza una búsqueda semántica usando ChromaDB."""
+    print(f"Consultando: '{query}'")
+    return retriever.invoke(query)
+
 
 template = """
 Eres un experto en salud materna y embarazo. Analiza el siguiente contexto médico y responde la pregunta de manera precisa y detallada.
@@ -79,10 +73,10 @@ PREGUNTA: {question}
 RESPUESTA DETALLADA:
 """
 
-_prompt = ChatPromptTemplate.from_template(template)
+prompt = ChatPromptTemplate.from_template(template)
 
 
-def _format_docs(docs: List[Document]) -> str:
+def format_docs(docs: List[Document]) -> str:
     """Formatea los documentos para ser incluidos en el prompt."""
     formatted_docs = []
     for i, doc in enumerate(docs):
@@ -99,10 +93,10 @@ Contenido: {doc.page_content}"""
 
 # Definición de la cadena RAG
 rag_chain = (
-    {"context": RunnableLambda(_instance.search) |
-     _format_docs, "question": RunnablePassthrough()}
-    | _prompt
-    | _instance.llm
+    {"context": RunnableLambda(search) | format_docs,
+     "question": RunnablePassthrough()}
+    | prompt
+    | llm
     | StrOutputParser()
 )
 

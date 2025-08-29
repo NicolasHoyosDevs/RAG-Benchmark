@@ -10,6 +10,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.documents import Document
 from typing import List, Dict, Any
+
 # Cargar configuración
 # Construir ruta absoluta al archivo .env en el directorio raíz
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -31,146 +32,79 @@ COLLECTION_NAME = "guia_embarazo_parto"
 
 # --- Sistema de Tracking Simplificado ---
 
-
-class SimpleTracker:
-    """Sistema simple para rastrear tokens y costos de cada operacion"""
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        """Reinicia las estadisticas"""
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_cost = 0.0
-        self.operations = []
-
-    def add_operation(self, name: str, input_tokens: int, output_tokens: int, cost: float):
-        """Agrega una operacion al tracking"""
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_cost += cost
-
-        operation = {
-            "name": name,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cost": cost
-        }
-        self.operations.append(operation)
-
-        print(f"   {name}:")
-        print(f"     - Tokens entrada: {input_tokens}")
-        print(f"     - Tokens salida: {output_tokens}")
-        print(f"     - Costo: ${cost:.6f}")
-
-    def show_summary(self):
-        """Muestra resumen total"""
-        print("\n" + "="*50)
-        print("RESUMEN TOTAL DE COSTOS:")
-        print(f"  Total tokens entrada: {self.total_input_tokens}")
-        print(f"  Total tokens salida: {self.total_output_tokens}")
-        print(f"  Costo total: ${self.total_cost:.6f}")
-        print("="*50)
+# Variable global para seguimiento de operaciones
+total_input_tokens = 0
+total_output_tokens = 0
+total_cost = 0.0
+operations = []
 
 
-# Inicializar tracker global
-tracker = SimpleTracker()
+def reset_tracking():
+    """Reinicia las estadísticas de tracking"""
+    global total_input_tokens, total_output_tokens, total_cost, operations
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cost = 0.0
+    operations = []
 
-# --- Configuración del Retriever Base ---
-base_retriever = None  # Se inicializará después de la clase ChromaRetriever
 
-# --- Retriever ChromaDB ---
+def add_operation(name: str, input_tokens: int, output_tokens: int, cost: float):
+    """Agrega una operación al tracking"""
+    global total_input_tokens, total_output_tokens, total_cost
+    total_input_tokens += input_tokens
+    total_output_tokens += output_tokens
+    total_cost += cost
+
+    operation = {
+        "name": name,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost": cost
+    }
+    operations.append(operation)
+
+    print(f"   {name}:")
+    print(f"     - Tokens entrada: {input_tokens}")
+    print(f"     - Tokens salida: {output_tokens}")
+    print(f"     - Costo: ${cost:.6f}")
 
 
-class ChromaRetriever:
-    def __init__(self, db_directory: str, collection_name: str, k: int = 5, score_threshold: float = 0.05):
-        self.db_directory = db_directory
-        self.collection_name = collection_name
-        self.k = k
-        self.score_threshold = score_threshold  # Nuevo: threshold de similaridad
-
-        # Inicializar embeddings (mismo modelo que create_embeddings.py)
-        self.embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            api_key=OPENAI_API_KEY
-        )
-
-        # Cargar base de datos
-        self._load_db()
-
-    def _load_db(self):
-        """Carga la base de datos ChromaDB"""
-        try:
-            self.db = Chroma(
-                persist_directory=str(self.db_directory),
-                embedding_function=self.embeddings,
-                collection_name=self.collection_name
-            )
-            print(
-                f"ChromaDB cargada: {self.db._collection.count()} documentos")
-        except Exception as e:
-            print(f"Error al cargar ChromaDB: {e}")
-            self.db = None
-
-    def invoke(self, query: str) -> List[tuple]:
-        """Realiza busqueda por similitud con scores"""
-        if not self.db:
-            print("Base de datos no disponible")
-            return []
-
-        try:
-            # Busqueda por similitud con scores en ChromaDB
-            results_with_scores = self.db.similarity_search_with_score(
-                query, k=self.k)
-
-            # Convertir distancias a similaridades y aplicar filtrado suave
-            filtered_results = []
-            for doc, distance in results_with_scores:
-                # ChromaDB usa distancia (menor = mas similar), convertir a similaridad
-                # Asegurar que no sea negativo
-                similarity = max(0.0, 1.0 - distance)
-
-                # Filtrado muy permisivo - solo eliminar documentos realmente irrelevantes
-                if similarity >= self.score_threshold:
-                    # Ensure doc is a proper Document object
-                    if hasattr(doc, 'page_content') and hasattr(doc, 'metadata'):
-                        filtered_results.append((doc, similarity))
-                    else:
-                        # If not a proper Document, create one
-                        from langchain_core.documents import Document
-                        if isinstance(doc, dict):
-                            content = doc.get(
-                                'page_content', doc.get('content', str(doc)))
-                            metadata = doc.get('metadata', {})
-                            proper_doc = Document(
-                                page_content=content, metadata=metadata)
-                            filtered_results.append((proper_doc, similarity))
-
-            print(
-                f"Documentos encontrados: {len(results_with_scores)}, filtrados por score: {len(filtered_results)}")
-
-            # Mostrar scores para debug (distancia -> similaridad)
-            if results_with_scores:
-                print(
-                    f"   Distancias originales: {[f'{dist:.3f}' for _, dist in results_with_scores[:3]]}")
-            if filtered_results:
-                print(
-                    f"   Similaridades convertidas: {[f'{sim:.3f}' for _, sim in filtered_results[:3]]}")
-
-            return filtered_results
-
-        except Exception as e:
-            print(f"Error en busqueda ChromaDB: {e}")
-            return []
+def show_summary():
+    """Muestra resumen total de costos"""
+    print("\n" + "="*50)
+    print("RESUMEN TOTAL DE COSTOS:")
+    print(f"  Total tokens entrada: {total_input_tokens}")
+    print(f"  Total tokens salida: {total_output_tokens}")
+    print(f"  Costo total: ${total_cost:.6f}")
+    print("="*50)
 
 
 # --- Configuración del Retriever Base ---
-base_retriever = ChromaRetriever(
-    db_directory=DB_DIRECTORY,
-    collection_name=COLLECTION_NAME,
-    k=8,  # Aumentar k para tener más candidatos
-    score_threshold=0.05  # Threshold muy permisivo (>5% similaridad)
+# Inicializar embeddings
+embeddings = OpenAIEmbeddings(
+    model="text-embedding-3-small",
+    api_key=OPENAI_API_KEY
+)
+
+# Cargar Chroma DB directamente
+try:
+    vectorstore = Chroma(
+        persist_directory=str(DB_DIRECTORY),
+        embedding_function=embeddings,
+        collection_name=COLLECTION_NAME
+    )
+    print(f"ChromaDB cargada: {vectorstore._collection.count()} documentos")
+except Exception as e:
+    print(f"Error al cargar ChromaDB: {e}")
+    vectorstore = None
+
+# Configurar retriever con parámetros de búsqueda
+base_retriever = vectorstore.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={
+        "k": 8,  # Recuperar más documentos para tener suficientes candidatos
+        "score_threshold": 0.05  # Filtro muy permisivo
+    }
 )
 
 
@@ -238,7 +172,7 @@ def contextual_retriever(question: str, max_final_docs: int = 8) -> List:
         rewritten_queries.append(rewritten_query)
 
         # Registrar la operacion de reescritura
-        tracker.add_operation(
+        add_operation(
             f"Reescritura {i}",
             cb.prompt_tokens,
             cb.completion_tokens,
@@ -254,34 +188,37 @@ def contextual_retriever(question: str, max_final_docs: int = 8) -> List:
     for i, query in enumerate(rewritten_queries, 1):
         print(f"Buscando con query {i}...")
 
-        # Usar callback para embeddings (aunque no se muestre explicitamente, se incluye en el total)
-        docs_with_scores = base_retriever.invoke(query)
+        # Hacer la búsqueda directamente con vectorstore
+        results = vectorstore.similarity_search_with_score(query, k=5)
 
-        # Filtrar duplicados y agregar peso por posicion de la query
-        for doc, score in docs_with_scores:
-            # Usar los primeros 100 caracteres como ID unico
+        # Procesar resultados
+        for doc, distance in results:
+            # Convertir distancia a similaridad
+            similarity = max(0.0, 1.0 - distance)
+
+            # Usar los primeros 100 caracteres como ID único
             doc_id = doc.page_content[:100]
+
             if doc_id not in doc_ids_seen:
                 doc_ids_seen.add(doc_id)
 
                 # Penalizar ligeramente documentos de queries posteriores
                 # Primera query: 1.0, segunda: 0.95, tercera: 0.90
                 query_weight = 1.0 - (i - 1) * 0.05
-                weighted_score = score * query_weight
+                weighted_score = similarity * query_weight
 
                 all_docs_with_scores.append(
                     (doc, weighted_score, f"query_{i}"))
 
-        print(
-            f"Documentos unicos encontrados con query {i}: {len(docs_with_scores)}")
+        print(f"Documentos únicos encontrados con query {i}: {len(results)}")
 
     # Ordenar por score de relevancia (mayor a menor)
     all_docs_with_scores.sort(key=lambda x: x[1], reverse=True)
 
-    # Seleccionar los top-k mas relevantes
+    # Seleccionar los top-k más relevantes
     if len(all_docs_with_scores) > max_final_docs:
         selected_docs = all_docs_with_scores[:max_final_docs]
-        print(f"Seleccionando top {max_final_docs} documentos mas relevantes")
+        print(f"Seleccionando top {max_final_docs} documentos más relevantes")
 
         # Mostrar scores de los seleccionados
         print(f"   Top scores: {[f'{score:.3f}({source})' for _,
@@ -295,7 +232,7 @@ def contextual_retriever(question: str, max_final_docs: int = 8) -> List:
 
     print(f"Total documentos finales: {len(final_docs)}")
 
-    # Debug: Mostrar que documentos se seleccionaron
+    # Debug: Mostrar qué documentos se seleccionaron
     if final_docs:
         for i, doc in enumerate(final_docs[:3]):
             print(f"Doc {i+1}: {doc.page_content[:100]}...")
@@ -375,8 +312,8 @@ def create_conversational_rag():
                 "question": question
             })
 
-        # Registrar la operacion de respuesta
-        tracker.add_operation(
+        # Registrar la operación de respuesta
+        add_operation(
             "Respuesta final",
             cb.prompt_tokens,
             cb.completion_tokens,
@@ -421,7 +358,7 @@ def query_for_evaluation(question: str) -> dict:
         ))
 
     # Registrar la operacion de evaluacion
-    tracker.add_operation(
+    add_operation(
         "Evaluacion RAGAS",
         cb.prompt_tokens,
         cb.completion_tokens,
@@ -443,8 +380,8 @@ def query_for_evaluation(question: str) -> dict:
             "rewrite_count": 3,
             "llm_model": "gpt-4o",
             "rewriter_model": "gpt-3.5-turbo",
-            "tokens_used": tracker.total_input_tokens + tracker.total_output_tokens,
-            "total_cost": tracker.total_cost
+            "tokens_used": total_input_tokens + total_output_tokens,
+            "total_cost": total_cost
         }
     }
 
@@ -453,18 +390,18 @@ def query_for_evaluation(question: str) -> dict:
 if __name__ == "__main__":
     try:
         print("--- Sistema RAG Conversacional con Multi-Query Rewriter para Embarazo y Parto ---")
-        print("Caracteristicas: Reescritura multiple de consultas (3 variaciones) para mejor busqueda")
+        print("Características: Reescritura múltiple de consultas (3 variaciones) para mejor búsqueda")
 
         # Inicializar componentes
         rag_chain = create_conversational_rag()
 
         print("\nComandos especiales:")
-        print("   - 'salir': Terminar sesion")
+        print("   - 'salir': Terminar sesión")
         print("   - 'reiniciar': Reiniciar contador de costos")
 
         while (query := input("\nTu pregunta (o 'salir', 'reiniciar'): ")) != "salir":
             if query.lower() == "reiniciar":
-                tracker.reset()
+                reset_tracking()
                 print("Contador de costos reiniciado")
                 continue
 
@@ -486,9 +423,9 @@ if __name__ == "__main__":
                 f"\nTiempo total del proceso: {end_time - start_time:.2f} segundos")
 
             # Mostrar resumen de costos
-            tracker.show_summary()
+            show_summary()
 
     finally:
         print("\nSistema finalizado correctamente.")
-        if tracker.total_cost > 0:
-            tracker.show_summary()
+        if total_cost > 0:
+            show_summary()

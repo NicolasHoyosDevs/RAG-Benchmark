@@ -8,7 +8,7 @@ document to perform semantic search instead of the original query.
 import os
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -26,108 +26,104 @@ load_dotenv(dotenv_path=ENV_PATH)
 if not os.getenv("OPENAI_API_KEY"):
     raise ValueError("OPENAI_API_KEY no encontrada en el archivo .env")
 
+# Definir rutas y configuraciones
+script_dir = Path(__file__).resolve().parent
+chroma_db_dir = script_dir.parent / "Data" / "embeddings" / "chroma_db"
+collection_name = "guia_embarazo_parto"
 
-class HyDERAG:
-    """HyDE RAG that generates hypothetical documents for better retrieval."""
+# Configurar modelos
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+# Más creativo para HyDE
+llm_hyde = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
+llm_answer = ChatOpenAI(model_name="gpt-4o", temperature=0)
 
-    def __init__(self):
-        # Rutas y nombres
-        self.script_dir = Path(__file__).resolve().parent
-        self.chroma_db_dir = self.script_dir.parent / "Data" / "embeddings" / "chroma_db"
-        self.collection_name = "guia_embarazo_parto"
+# Cargar ChromaDB
+vectorstore = Chroma(
+    persist_directory=str(chroma_db_dir),
+    embedding_function=embeddings,
+    collection_name=collection_name,
+)
 
-        # Modelos
-        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        # Más creativo para HyDE
-        self.llm_hyde = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
-        self.llm_answer = ChatOpenAI(model_name="gpt-4o", temperature=0)
+# Configurar retriever semántico
+retriever = vectorstore.as_retriever(
+    search_kwargs={"k": 5}
+)
 
-        # Cargar ChromaDB
-        self.vectorstore = Chroma(
-            persist_directory=str(self.chroma_db_dir),
-            embedding_function=self.embeddings,
-            collection_name=self.collection_name,
-        )
+print("Sistema RAG HyDE inicializado.")
+print(f"   Documentos en base de datos: {vectorstore._collection.count()}")
 
-        # Retriever semántico
-        self.retriever = self.vectorstore.as_retriever(
-            search_kwargs={"k": 5}
-        )
+# Prompt para generar documentos hipotéticos
+hyde_prompt = ChatPromptTemplate.from_template("""
+Eres un experto médico escribiendo una sección detallada de una guía médica sobre embarazo y parto.
 
-        print("Sistema RAG HyDE inicializado.")
-        print(
-            f"   Documentos en base de datos: {self.vectorstore._collection.count()}")
+Basándote en esta pregunta: {question}
 
-    def generate_hypothetical_document(self, query: str) -> tuple:
-        """Genera un documento hipotético basado en la pregunta y retorna métricas."""
-        hyde_prompt = ChatPromptTemplate.from_template("""
-        Eres un experto médico escribiendo una sección detallada de una guía médica sobre embarazo y parto.
+Escribe un documento médico detallado y completo que respondería perfectamente a esta pregunta.
+El documento debe incluir:
+- Información médica precisa sobre el tema
+- Detalles clínicos relevantes
+- Recomendaciones médicas apropiadas
+- Consideraciones importantes para la salud materna
+- Información práctica y consejos
 
-        Basándote en esta pregunta: {question}
+Escribe el documento como si fuera parte de una guía médica oficial sobre embarazo y parto.
+Sé específico, detallado y usa terminología médica apropiada.
 
-        Escribe un documento médico detallado y completo que respondería perfectamente a esta pregunta.
-        El documento debe incluir:
-        - Información médica precisa sobre el tema
-        - Detalles clínicos relevantes
-        - Recomendaciones médicas apropiadas
-        - Consideraciones importantes para la salud materna
-        - Información práctica y consejos
+DOCUMENTO HIPOTÉTICO:
+""")
 
-        Escribe el documento como si fuera parte de una guía médica oficial sobre embarazo y parto.
-        Sé específico, detallado y usa terminología médica apropiada.
 
-        DOCUMENTO HIPOTÉTICO:
-        """)
+def generate_hypothetical_document(query: str) -> Dict[str, Any]:
+    """Genera un documento hipotético basado en la pregunta y retorna métricas."""
+    with get_openai_callback() as cb:
+        response = (hyde_prompt | llm_hyde | StrOutputParser()
+                    ).invoke({"question": query})
 
-        with get_openai_callback() as cb:
-            response = (hyde_prompt | self.llm_hyde |
-                        StrOutputParser()).invoke({"question": query})
+    hypothetical_doc = response.strip()
 
-        hypothetical_doc = response.strip()
+    return {
+        'document': hypothetical_doc,
+        'input_tokens': cb.prompt_tokens,
+        'output_tokens': cb.completion_tokens,
+        'cost': cb.total_cost
+    }
 
-        return {
-            'document': hypothetical_doc,
-            'input_tokens': cb.prompt_tokens,
-            'output_tokens': cb.completion_tokens,
-            'cost': cb.total_cost
-        }
 
-    def search_with_hyde(self, query: str) -> tuple:
-        """Realiza búsqueda usando HyDE: genera documento hipotético y lo usa para buscar."""
-        print(f"Pregunta original: '{query}'")
+def search_with_hyde(query: str) -> tuple:
+    """Realiza búsqueda usando HyDE: genera documento hipotético y lo usa para buscar."""
+    print(f"Pregunta original: '{query}'")
 
-        # 1. Generar documento hipotético con métricas
-        print("Generando documento hipotético...")
-        hyde_result = self.generate_hypothetical_document(query)
+    # 1. Generar documento hipotético con métricas
+    print("Generando documento hipotético...")
+    hyde_result = generate_hypothetical_document(query)
 
-        hypothetical_doc = hyde_result['document']
-        print(
-            f"Documento hipotético generado ({len(hypothetical_doc)} caracteres)")
-        print(f"   - Tokens prompt: {hyde_result['input_tokens']}")
-        print(f"   - Tokens respuesta: {hyde_result['output_tokens']}")
-        print(f"   - Costo generación: ${hyde_result['cost']:.6f}")
+    hypothetical_doc = hyde_result['document']
+    print(
+        f"Documento hipotético generado ({len(hypothetical_doc)} caracteres)")
+    print(f"   - Tokens prompt: {hyde_result['input_tokens']}")
+    print(f"   - Tokens respuesta: {hyde_result['output_tokens']}")
+    print(f"   - Costo generación: ${hyde_result['cost']:.6f}")
 
-        # Mostrar preview del documento hipotético
-        print(f"\n--- DOCUMENTO HIPOTÉTICO (primeros 300 caracteres) ---")
-        print(hypothetical_doc[:300] +
-              "..." if len(hypothetical_doc) > 300 else hypothetical_doc)
-        print("--- FIN DOCUMENTO HIPOTÉTICO ---\n")
+    # Mostrar preview del documento hipotético
+    print(f"\n--- DOCUMENTO HIPOTÉTICO (primeros 300 caracteres) ---")
+    print(hypothetical_doc[:300] +
+          "..." if len(hypothetical_doc) > 300 else hypothetical_doc)
+    print("--- FIN DOCUMENTO HIPOTÉTICO ---\n")
 
-        # 2. Usar el documento hipotético para búsqueda semántica
-        print("Buscando documentos similares al documento hipotético...")
-        retrieved_docs = self.retriever.invoke(hypothetical_doc)
+    # 2. Usar el documento hipotético para búsqueda semántica
+    print("Buscando documentos similares al documento hipotético...")
+    retrieved_docs = retriever.invoke(hypothetical_doc)
 
-        print(f"Documentos encontrados: {len(retrieved_docs)}")
+    print(f"Documentos encontrados: {len(retrieved_docs)}")
 
-        # Retornar documentos y métricas de HyDE
-        return retrieved_docs, hyde_result
+    # Retornar documentos y métricas de HyDE
+    return retrieved_docs, hyde_result
 
 
 # ----------------------------- Cadena RAG ----------------------------- #
-_instance = HyDERAG()
 
 # Template para respuesta final
-template = """
+qa_template = """
 Eres un experto en salud materna y embarazo. Analiza el siguiente contexto médico y responde la pregunta de manera precisa y detallada.
 
 INSTRUCCIONES:
@@ -144,10 +140,10 @@ PREGUNTA: {question}
 RESPUESTA MÉDICA DETALLADA:
 """
 
-_prompt = ChatPromptTemplate.from_template(template)
+qa_prompt = ChatPromptTemplate.from_template(qa_template)
 
 
-def _format_docs(docs_and_hyde) -> str:
+def format_docs(docs_and_hyde) -> str:
     """Formatea los documentos para ser incluidos en el prompt."""
     docs, hyde_result = docs_and_hyde
 
@@ -171,7 +167,7 @@ def process_hyde_query(query: str):
 
     # 1. Generar documento hipotético con métricas
     print("Generando documento hipotético...")
-    hyde_result = _instance.generate_hypothetical_document(query)
+    hyde_result = generate_hypothetical_document(query)
 
     hypothetical_doc = hyde_result['document']
     print(
@@ -188,15 +184,15 @@ def process_hyde_query(query: str):
 
     # 2. Buscar documentos similares
     print("Buscando documentos similares al documento hipotético...")
-    retrieved_docs = _instance.retriever.invoke(hypothetical_doc)
+    retrieved_docs = retriever.invoke(hypothetical_doc)
     print(f"Documentos encontrados: {len(retrieved_docs)}")
 
     # 3. Formatear contexto
-    formatted_context = _format_docs((retrieved_docs, hyde_result))
+    formatted_context = format_docs((retrieved_docs, hyde_result))
 
     # 4. Generar respuesta final con métricas
     with get_openai_callback() as cb_answer:
-        response = _instance.llm_answer.invoke(_prompt.format_messages(
+        response = llm_answer.invoke(qa_prompt.format_messages(
             context=formatted_context,
             question=query
         ))
