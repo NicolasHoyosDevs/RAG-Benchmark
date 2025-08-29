@@ -44,10 +44,11 @@ class HybridRAGResearchLCBM25:
     """
 
     def __init__(self):
-        # Rutas y nombres
-        self.chroma_db_dir = Path("../Data/embeddings/chroma_db")
+        # Rutas y nombres (relativo al proyecto)
+        project_root = Path(__file__).parent.parent
+        self.chroma_db_dir = project_root / "Data" / "embeddings" / "chroma_db"
         self.collection_name = "guia_embarazo_parto"
-        self.chunks_file = Path("../Data/chunks/chunks_final.json")
+        self.chunks_file = project_root / "Data" / "chunks" / "chunks_final.json"
 
         # Modelos
         self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
@@ -346,23 +347,34 @@ def query_for_evaluation(question: str) -> dict:
     """
     print(f"🔍 Evaluando (Hybrid BM25+Semántico): {question}")
     
-    # 1. Obtener documentos usando búsqueda híbrida
-    # Usar parámetros balanceados para evaluación
-    retrieved_docs = _instance.hybrid_search(
-        question, 
-        k=5,                    # Top 5 documentos
-        alpha=0.5,              # 70% peso semántico, 30% BM25 
-        fusion_method="linear"   # Fusión lineal (más estable que RRF)
-    )
+    # Medir tiempo de ejecución
+    import time
+    start_time = time.time()
     
-    # 2. Formatear contextos para la respuesta
-    formatted_context = _format_docs(retrieved_docs)
+    # Tracking completo de embeddings + LLM
+    from langchain_community.callbacks import get_openai_callback
     
-    # 3. Generar respuesta usando el LLM con el prompt médico
-    response = _instance.llm.invoke(_prompt.format_messages(
-        context=formatted_context, 
-        question=question
-    ))
+    with get_openai_callback() as cb:
+        # 1. Obtener documentos usando búsqueda híbrida (incluye embeddings)
+        retrieved_docs = _instance.hybrid_search(
+            question, 
+            k=5,                    # Top 5 documentos
+            alpha=0.5,              # 50% peso semántico, 50% BM25 
+            fusion_method="linear"   # Fusión lineal (más estable que RRF)
+        )
+        
+        # 2. Formatear contextos para la respuesta
+        formatted_context = _format_docs(retrieved_docs)
+        
+        # 3. Generar respuesta usando el LLM
+        response = _instance.llm.invoke(_prompt.format_messages(
+            context=formatted_context, 
+            question=question
+        ))
+    
+    # Calcular tiempo total
+    end_time = time.time()
+    execution_time = end_time - start_time
     
     # 4. Preparar lista de contextos (solo contenido textual para RAGAS)
     contexts = [doc.page_content for doc in retrieved_docs]
@@ -371,6 +383,8 @@ def query_for_evaluation(question: str) -> dict:
     hybrid_scores = [doc.metadata.get('hybrid_score', 0.0) for doc in retrieved_docs]
     semantic_scores = [doc.metadata.get('semantic_score', 0.0) for doc in retrieved_docs]
     bm25_scores = [doc.metadata.get('bm25_score', 0.0) for doc in retrieved_docs]
+    
+    print(f"✅ Evaluación completada en {execution_time:.2f}s")
     
     # 6. Retornar estructura completa para RAGAS
     return {
@@ -393,6 +407,16 @@ def query_for_evaluation(question: str) -> dict:
                 "hybrid": hybrid_scores,
                 "semantic": semantic_scores, 
                 "bm25": bm25_scores
-            }
+            },
+            
+            # Métricas de rendimiento para evaluación (AGREGADO)
+            "execution_time": execution_time,
+            "input_tokens": cb.prompt_tokens,
+            "output_tokens": cb.completion_tokens,
+            # "embedding_tokens": 0,  # Comentado temporalmente
+            "total_cost": cb.total_cost,
+            
+            # Métricas legacy (mantener compatibilidad)
+            "tokens_used": cb.prompt_tokens + cb.completion_tokens,
         }
     }
