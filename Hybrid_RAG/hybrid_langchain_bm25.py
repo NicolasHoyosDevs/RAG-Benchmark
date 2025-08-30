@@ -1,422 +1,241 @@
-"""Hybrid RAG usando BM25 de LangChain para la parte lexical.
+"""
+Simplified Hybrid RAG using LangChain's EnsembleRetriever.
 
-Este archivo reemplaza la implementación manual de BM25 por el BM25Retriever
-de LangChain, pero mantiene:
- - Búsqueda semántica vía Chroma + OpenAI embeddings
- - Lógica de fusión (lineal y RRF)
- - Normalización de scores y trazabilidad de cada documento
-
-
-Nota: BM25Retriever actualmente no expone directamente los scores en los
-Document que retorna. Para poder integrar con la fusión necesitamos acceder
-al objeto interno `bm25` (BM25Okapi) y calcular los scores completos, luego
-ordenar y recortar al top-k.
+This script implements a Hybrid RAG pipeline combining lexical search (BM25)
+and semantic search (ChromaDB) using LangChain's EnsembleRetriever.
 """
 
 import os
 import json
+import time
 from pathlib import Path
-from typing import List, Dict, Tuple
-from collections import defaultdict
+from typing import List, Dict, Any
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain_community.callbacks import get_openai_callback
 from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
-
+from langchain.retrievers import EnsembleRetriever
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 
-# Cargar variables de entorno
-load_dotenv(dotenv_path='../.env')
+# --- Environment and Path Configuration ---
+
+# Load environment variables from .env file
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
+
 
 if not os.getenv("OPENAI_API_KEY"):
-    raise ValueError("OPENAI_API_KEY no encontrada en el archivo .env")
+    raise ValueError("OPENAI_API_KEY not found in the .env file")
+
+# Define paths
+script_dir = Path(__file__).resolve().parent
+chroma_db_dir = script_dir.parent / "Data" / "embeddings" / "chroma_db"
+collection_name = "guia_embarazo_parto"
+chunks_file = script_dir.parent / "Data" / "chunks" / "chunks_final.json"
+
+# --- Document Loading ---
 
 
-class HybridRAGResearchLCBM25:
-    """Versión híbrida que usa BM25Retriever de LangChain.
+def load_documents() -> List[Document]:
+    """Loads chunks from the JSON file and converts them to LangChain Documents."""
+    with open(chunks_file, 'r', encoding='utf-8') as f:
+        chunks_data = json.load(f)
 
-    Mantiene los métodos de fusión y la estructura de retorno de documentos
-    para poder ser intercambiable con la versión previa.
-    """
-
-    def __init__(self):
-        # Rutas y nombres (relativo al proyecto)
-        project_root = Path(__file__).parent.parent
-        self.chroma_db_dir = project_root / "Data" / "embeddings" / "chroma_db"
-        self.collection_name = "guia_embarazo_parto"
-        self.chunks_file = project_root / "Data" / "chunks" / "chunks_final.json"
-
-        # Modelos
-        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        self.llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
-
-        # Vector store (semántico)
-        self.vectorstore = Chroma(
-            persist_directory=str(self.chroma_db_dir),
-            embedding_function=self.embeddings,
-            collection_name=self.collection_name,
-        )
-
-        # Cargar documentos base
-        self.documents: List[Dict] = self._load_documents()
-
-        # Construir lista de Document para BM25Retriever
-        self._build_bm25_retriever()
-
-        print("✅ Sistema híbrido (LangChain BM25) inicializado:")
-        print(f"   📄 Documentos cargados: {len(self.documents)}")
-
-    # ----------------------------- Carga ----------------------------- #
-    def _load_documents(self) -> List[Dict]:
-        with open(self.chunks_file, 'r', encoding='utf-8') as f:
-            return json.load(f)
-
-    def _build_bm25_retriever(self):
-        """Construye el BM25Retriever de LangChain.
-
-        Guardamos la referencia a los Document en el mismo orden que el JSON
-        para poder mapear índices (enumerate) a self.documents.
-        """
-        lc_docs: List[Document] = []
-        for d in self.documents:
-            lc_docs.append(Document(page_content=d['content'], metadata=d))
-
-        # Crear retriever
-        self.bm25_retriever: BM25Retriever = BM25Retriever.from_documents(
-            lc_docs)
-
-        self.bm25_obj = getattr(self.bm25_retriever, 'vectorizer')
-
-    # ----------------------------- Búsquedas ----------------------------- #
-    def semantic_search(self, query: str, k: int = 10) -> List[Tuple[int, float]]:
-        results = self.vectorstore.similarity_search_with_score(query, k=k)
-        semantic_results: List[Tuple[int, float]] = []
-
-        for doc, distance in results:
-            similarity = 1 / (1 + distance)
-            page_num = doc.metadata.get('page_number')
-            chunk_idx = doc.metadata.get('chunk_index')
-
-            # Mapear al índice del JSON original
-            mapped_index = None
-            # Optimización: metemos un dict de lookup si se vuelve costoso; por ahora lineal
-            for i, d in enumerate(self.documents):
-                if d.get('page_number') == page_num and d.get('chunk_index') == chunk_idx:
-                    mapped_index = i
-                    break
-            if mapped_index is not None:
-                semantic_results.append((mapped_index, similarity))
-        return semantic_results
-
-    def bm25_search(self, query: str, k: int = 10) -> List[Tuple[int, float]]:
-        """Obtiene scores BM25 desde el retriever de LangChain.
-
-        Si tenemos acceso al objeto BM25 interno, extraemos los scores.
-        Si no, usamos ranking ordinal basado en el orden de documentos devueltos.
-        """
-        if self.bm25_obj and hasattr(self.bm25_obj, 'get_scores'):
-            # Método 1: Acceso directo a scores
-            if hasattr(self.bm25_retriever, '_tokenizer'):
-                tokens_query = self.bm25_retriever._tokenizer(query)
-            else:
-                tokens_query = query.lower().split()
-
-            scores_all = self.bm25_obj.get_scores(tokens_query)
-            indexed_scores = list(enumerate(scores_all))
-            indexed_scores.sort(key=lambda x: x[1], reverse=True)
-            return indexed_scores[:k]
-        else:
-            # Método 2: Usar retriever normal y asignar scores ordinales
-            print("   📝 Usando BM25 ordinal (sin scores exactos)")
-            docs = self.bm25_retriever.get_relevant_documents(query)
-            results = []
-
-            for rank, doc in enumerate(docs[:k]):
-                # Mapear documento a índice original
-                doc_idx = None
-                for i, orig_doc in enumerate(self.documents):
-                    if orig_doc['content'] == doc.page_content:
-                        doc_idx = i
-                        break
-
-                if doc_idx is not None:
-                    # Score ordinal: máximo para el primero, decrece linealmente
-                    score = max(0, k - rank) / k
-                    results.append((doc_idx, score))
-
-            return results
-
-    # ----------------------------- Fusión ----------------------------- #
-    def _normalize_scores(self, scores: List[Tuple[int, float]]):
-        if not scores:
-            return {}
-        max_score = max(s for _, s in scores)
-        if max_score == 0:
-            return {i: 0.0 for i, _ in scores}
-        return {i: s / max_score for i, s in scores}
-
-    def _linear_fusion(self, semantic_results: List[Tuple[int, float]], bm25_results: List[Tuple[int, float]], alpha: float):
-        sem_norm = self._normalize_scores(semantic_results)
-        bm25_norm = self._normalize_scores(bm25_results)
-        all_ids = set(sem_norm) | set(bm25_norm)
-        return {
-            i: alpha * sem_norm.get(i, 0.0) +
-            (1 - alpha) * bm25_norm.get(i, 0.0)
-            for i in all_ids
-        }
-
-    def _rrf_fusion(self, semantic_results: List[Tuple[int, float]], bm25_results: List[Tuple[int, float]], alpha: float, k_rrf: int = 60):
-        combined = defaultdict(float)
-        for rank, (idx, _) in enumerate(semantic_results):
-            combined[idx] += alpha * (1 / (k_rrf + rank + 1))
-        for rank, (idx, _) in enumerate(bm25_results):
-            combined[idx] += (1 - alpha) * (1 / (k_rrf + rank + 1))
-        return dict(combined)
-
-    # ----------------------------- Híbrido ----------------------------- #
-    def hybrid_search(self, query: str, k: int = 5, alpha: float = 0.7, fusion_method: str = "linear") -> List[Document]:
-
-        print(f"🔍 Consultando: '{query}'")
-        print(f"   Parámetros: k={k}, alpha={alpha}, fusion={fusion_method}")
-
-        semantic_results = self.semantic_search(query, k=k*2)
-        bm25_results = self.bm25_search(query, k=k*2)
-
-        if fusion_method == "rrf":
-            combined = self._rrf_fusion(semantic_results, bm25_results, alpha)
-        else:
-            combined = self._linear_fusion(
-                semantic_results, bm25_results, alpha)
-
-        top = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:k]
-        final_docs: List[Document] = []
-        for idx, final_score in top:
-            if idx < len(self.documents):
-                base = self.documents[idx]
-                sem_score = next(
-                    (s for i, s in semantic_results if i == idx), 0.0)
-                bm25_score = next(
-                    (s for i, s in bm25_results if i == idx), 0.0)
-                final_docs.append(
-                    Document(
-                        page_content=base['content'],
-                        metadata={
-                            **base,
-                            'hybrid_score': final_score,
-                            'semantic_score': sem_score,
-                            'bm25_score': bm25_score,
-                            'fusion_method': fusion_method,
-                            'alpha': alpha,
-                            'bm25_impl': 'langchain'
-                        }
-                    )
-                )
-        return final_docs
-
-    # (Opcional) Diagnóstico limitado
-    def diagnostic_search(self, query: str):
-        print(f"\n=== Diagnóstico: {query} ===")
-        sem = self.semantic_search(query, k=5)
-        bm = self.bm25_search(query, k=5)
-        print("Semántico (idx, score):", sem[:3])
-        print("BM25 (idx, score):", bm[:3])
+    return [
+        Document(page_content=d['content'], metadata=d)
+        for d in chunks_data
+    ]
 
 
-# ----------------------------- Cadena RAG (opcional) ----------------------------- #
-_instance = HybridRAGResearchLCBM25()
+documents = load_documents()
+
+# --- Model and Retriever Configuration ---
+
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
+
+# 1. Lexical Retriever (BM25)
+bm25_retriever = BM25Retriever.from_documents(documents)
+bm25_retriever.k = 5
+
+# 2. Semantic Retriever (Chroma)
+vectorstore = Chroma(
+    persist_directory=str(chroma_db_dir),
+    embedding_function=embeddings,
+    collection_name=collection_name,
+)
+semantic_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+
+# 3. Ensemble Retriever
+ensemble_weight_bm25 = 0.2
+ensemble_weight_semantic = 0.8
+ensemble_retriever = EnsembleRetriever(
+    retrievers=[bm25_retriever, semantic_retriever],
+    weights=[ensemble_weight_bm25, ensemble_weight_semantic]
+)
 
 
-def lc_bm25_retriever(query: str) -> List[Document]:
-    return _instance.hybrid_search(query, k=5, alpha=0.5, fusion_method="linear")
+# --- Prompt Templates ---
 
+# Prompt for generating the final answer
+qa_template = """
+You are an expert in maternal health and pregnancy. Analyze the following medical context and answer the question accurately and in detail.
 
-template = """
-Eres un experto en salud materna y embarazo. Analiza el siguiente contexto médico y responde la pregunta de manera precisa y detallada.
+INSTRUCTIONS:
+- Use ONLY the information provided in the context.
+- If the information is sufficient, provide a detailed answer.
+- If there is not enough information, state that clearly.
+- Remember that you are a medical specialist answering queries about pregnancy and childbirth.
 
-INSTRUCCIONES:
-- Usa ÚNICAMENTE la información proporcionada en el contexto
-- Si encuentras información relevante, proporciona una respuesta detallada con recomendaciones específicas
-- Si no hay información suficiente, di claramente qué información falta
-- Enfócate en la evidencia médica y recomendaciones cuando estén disponibles
-
-CONTEXTO MÉDICO:
+MEDICAL CONTEXT:
 {context}
 
-PREGUNTA: {question}
+QUESTION: {question}
 
-RESPUESTA DETALLADA:
+DETAILED MEDICAL ANSWER:
 """
+qa_prompt = ChatPromptTemplate.from_template(qa_template)
 
-_prompt = ChatPromptTemplate.from_template(template)
 
+# --- Core Functions ---
 
-def _format_docs(docs: List[Document]):
+def format_docs(docs: List[Document]) -> str:
+    """
+    Formats the retrieved documents to be included in the final prompt.
+
+    Args:
+        docs (list): A list of retrieved LangChain Document objects.
+
+    Returns:
+        str: A formatted string containing the content of the documents.
+    """
     formatted_docs = []
     for i, doc in enumerate(docs):
-        hybrid_score = doc.metadata.get('hybrid_score', 0.0)
-        semantic_score = doc.metadata.get('semantic_score', 0.0)
-        bm25_score = doc.metadata.get('bm25_score', 0.0)
         source = doc.metadata.get('source', 'N/A')
         page = doc.metadata.get('page_number', 'N/A')
 
-        formatted_doc = f"""--- Documento {i+1} ---
-Puntuación Híbrida: {hybrid_score:.4f} (Semántica: {semantic_score:.4f}, BM25: {bm25_score:.4f})
-Fuente: {source}, Página: {page}
-Contenido: {doc.page_content}"""
+        formatted_doc = f"""--- Document {i+1} ---
+Source: {source}, Page: {page}
+Content: {doc.page_content}"""
         formatted_docs.append(formatted_doc)
 
     return "\n\n".join(formatted_docs)
 
 
-def _context_fn(q: str) -> str:
-    return _format_docs(lc_bm25_retriever(q))
+def process_hybrid_query(query: str) -> Dict[str, Any]:
+    """
+    Processes a query using the hybrid RAG pipeline.
 
+    Args:
+        query (str): The user's question.
 
-rag_chain_lc_bm25 = (
-    # type: ignore
-    {"context": RunnableLambda(_context_fn), "question": RunnablePassthrough()}
-    | _prompt
-    | _instance.llm
-    | StrOutputParser()
-)
+    Returns:
+        Dict[str, Any]: A dictionary with the final answer, contexts, and detailed metrics.
+    """
+    # 1. Retrieve similar documents using the ensemble retriever
+    retrieved_docs = ensemble_retriever.invoke(query)
 
+    # 2. Format context
+    formatted_context = format_docs(retrieved_docs)
 
-if __name__ == "__main__":
-    print("=== RAG Híbrido (LangChain BM25) ===")
-    print("Opciones:")
-    print("- 'diagnostic [consulta]': Diagnóstico detallado")
-    print("- 'semantic [consulta]': Solo búsqueda semántica")
-    print("- 'salir': Terminar")
+    # 3. Generate final answer
+    with get_openai_callback() as cb_answer:
+        response = llm.invoke(qa_prompt.format_messages(
+            context=formatted_context,
+            question=query
+        ))
 
-    while (query := input("\nPregunta: ")) != "salir":
-        print("\n" + "="*50)
-
-        if query.startswith("diagnostic "):
-            actual_query = query[11:]
-            _instance.diagnostic_search(actual_query)
-        elif query.startswith("semantic "):
-            actual_query = query[9:]
-            results = _instance.semantic_search(actual_query, k=3)
-            print(f"Resultados semánticos para: '{actual_query}'")
-            for i, (idx, score) in enumerate(results):
-                if idx < len(_instance.documents):
-                    doc = _instance.documents[idx]
-                    print(
-                        f"{i+1}. Score: {score:.4f} - {doc['content'][:150]}...")
-        else:
-            # 1. Recuperar documentos
-            retrieved_docs = lc_bm25_retriever(query)
-
-            # 2. Mostrar los documentos y sus scores
-            print("DOCUMENTOS RECUPERADOS:")
-            formatted_context = _format_docs(retrieved_docs)
-            print(formatted_context)
-            print("\n" + "-"*20 + "\n")
-
-            # 3. Generar respuesta usando los documentos recuperados
-            chain_with_context = (
-                _prompt
-                | _instance.llm
-                | StrOutputParser()
-            )
-            answer = chain_with_context.invoke({
-                "context": formatted_context,
-                "question": query
-            })
-
-            print("RESPUESTA:")
-            print(answer)
-
-        print("="*50)
+    # 4. Return response and all metrics
+    return {
+        'answer': response.content,
+        'contexts': [doc.page_content for doc in retrieved_docs],
+        'retrieved_documents': retrieved_docs,
+        'metrics': {
+            'input_tokens': cb_answer.prompt_tokens,
+            'output_tokens': cb_answer.completion_tokens,
+            'cost': cb_answer.total_cost
+        }
+    }
 
 
 def query_for_evaluation(question: str) -> dict:
     """
-    Función específica para evaluación con RAGAS del RAG Híbrido.
-    Retorna estructura completa: pregunta, respuesta, contextos y metadatos.
-    
+    A wrapper function for RAG evaluation frameworks like Ragas.
+
+    This function processes a question and returns a dictionary structured for
+    easy integration with evaluation tools, preserving the original output format.
+
     Args:
-        question (str): La pregunta a procesar
-        
+        question (str): The question to process.
+
     Returns:
-        dict: Estructura con question, answer, contexts, source_documents y metadata
+        dict: A dictionary containing the question, answer, contexts, source_documents, and metadata.
     """
-    print(f"🔍 Evaluando (Hybrid BM25+Semántico): {question}")
-    
-    # Medir tiempo de ejecución
-    import time
     start_time = time.time()
-    
-    # Tracking completo de embeddings + LLM
-    from langchain_community.callbacks import get_openai_callback
-    
-    with get_openai_callback() as cb:
-        # 1. Obtener documentos usando búsqueda híbrida (incluye embeddings)
-        retrieved_docs = _instance.hybrid_search(
-            question, 
-            k=5,                    # Top 5 documentos
-            alpha=0.5,              # 50% peso semántico, 50% BM25 
-            fusion_method="linear"   # Fusión lineal (más estable que RRF)
-        )
-        
-        # 2. Formatear contextos para la respuesta
-        formatted_context = _format_docs(retrieved_docs)
-        
-        # 3. Generar respuesta usando el LLM
-        response = _instance.llm.invoke(_prompt.format_messages(
-            context=formatted_context, 
-            question=question
-        ))
-    
-    # Calcular tiempo total
+    result = process_hybrid_query(question)
     end_time = time.time()
     execution_time = end_time - start_time
-    
-    # 4. Preparar lista de contextos (solo contenido textual para RAGAS)
-    contexts = [doc.page_content for doc in retrieved_docs]
-    
-    # 5. Extraer información de scores para metadatos
-    hybrid_scores = [doc.metadata.get('hybrid_score', 0.0) for doc in retrieved_docs]
-    semantic_scores = [doc.metadata.get('semantic_score', 0.0) for doc in retrieved_docs]
-    bm25_scores = [doc.metadata.get('bm25_score', 0.0) for doc in retrieved_docs]
-    
-    print(f"✅ Evaluación completada en {execution_time:.2f}s")
-    
-    # 6. Retornar estructura completa para RAGAS
+
+    input_tokens = result["metrics"]["input_tokens"]
+    output_tokens = result["metrics"]["output_tokens"]
+
     return {
         "question": question,
-        "answer": response.content,
-        "contexts": contexts,  # Lista de strings con el contenido de los documentos
-        "source_documents": retrieved_docs,  # Documentos completos con metadata híbrido
+        "answer": result["answer"],
+        "contexts": result["contexts"],
+        "source_documents": result["retrieved_documents"],
         "metadata": {
-            "num_contexts": len(contexts),
+            "num_contexts": len(result["contexts"]),
             "retrieval_method": "hybrid_bm25_semantic",
-            "fusion_method": "linear",
-            "alpha": 0.7,
+            "ensemble_weights": [ensemble_weight_bm25, ensemble_weight_semantic],
             "llm_model": "gpt-4o",
-            "semantic_model": "text-embedding-3-small",
-            "bm25_impl": "langchain",
-            "avg_hybrid_score": sum(hybrid_scores) / len(hybrid_scores) if hybrid_scores else 0.0,
-            "avg_semantic_score": sum(semantic_scores) / len(semantic_scores) if semantic_scores else 0.0,
-            "avg_bm25_score": sum(bm25_scores) / len(bm25_scores) if bm25_scores else 0.0,
-            "score_distribution": {
-                "hybrid": hybrid_scores,
-                "semantic": semantic_scores, 
-                "bm25": bm25_scores
-            },
-            
-            # Métricas de rendimiento para evaluación (AGREGADO)
+            "embedding_model": "text-embedding-3-small",
             "execution_time": execution_time,
-            "input_tokens": cb.prompt_tokens,
-            "output_tokens": cb.completion_tokens,
-            # "embedding_tokens": 0,  # Comentado temporalmente
-            "total_cost": cb.total_cost,
-            
-            # Métricas legacy (mantener compatibilidad)
-            "tokens_used": cb.prompt_tokens + cb.completion_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_cost": result["metrics"]["cost"],
+            "tokens_used": input_tokens + output_tokens,
         }
     }
+
+
+# --- Main Execution Block ---
+
+if __name__ == "__main__":
+    print("\n=== Hybrid RAG (LangChain BM25 + Semantic) ===")
+    print("This system uses a hybrid search to retrieve relevant documents and generate an answer.")
+    print(f"Documents loaded: {len(documents)}")
+    try:
+        print(f"Vector store documents: {vectorstore._collection.count()}")
+    except Exception as e:
+        print(f"Could not retrieve vector store document count: {e}")
+    print("\nType your question or 'exit' to finish.")
+
+    while True:
+        query = input("\nQuestion: ")
+        if query.lower() == "exit":
+            break
+
+        start_time = time.time()
+        result = process_hybrid_query(query)
+        end_time = time.time()
+
+        print("\n" + "="*50)
+        print("ANSWER:")
+        print(result['answer'])
+        print("\n" + "="*50)
+
+        # Display detailed metrics
+        print("\n DETAILED METRICS:")
+        print(f"     Total time: {end_time - start_time:.2f} seconds")
+        print(
+            f"   - Input Tokens (prompt): {result['metrics']['input_tokens']}")
+        print(
+            f"   - Output Tokens (answer): {result['metrics']['output_tokens']}")
+        print(f"   - Total Cost (USD): ${result['metrics']['cost']:.6f}")
+
+    print("\nSystem finished.")

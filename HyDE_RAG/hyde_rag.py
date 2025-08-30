@@ -1,211 +1,183 @@
 """
 HyDE RAG - Hypothetical Document Embeddings for medical Q&A.
 
-HyDE generates a hypothetical document based on the query, then uses that
-document to perform semantic search instead of the original query.
+This script implements a RAG (Retrieval-Augmented Generation) pipeline using
+the HyDE (Hypothetical Document Embeddings) strategy. It generates a hypothetical
+document based on a user's query and then uses that document to perform
+semantic search for relevant context. This approach can improve retrieval
+accuracy by searching for a more detailed document rather than a short query.
 """
 
 import os
 import time
 from pathlib import Path
-from typing import List
+from typing import Dict, Any, List
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_community.callbacks import get_openai_callback
-from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 
-# Cargar variables de entorno
+# --- Environment and Path Configuration ---
+
+# Load environment variables from .env file
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 if not os.getenv("OPENAI_API_KEY"):
-    raise ValueError("OPENAI_API_KEY no encontrada en el archivo .env")
+    raise ValueError("OPENAI_API_KEY not found in the .env file")
+
+# Define paths
+script_dir = Path(__file__).resolve().parent
+chroma_db_dir = script_dir.parent / "Data" / "embeddings" / "chroma_db"
+collection_name = "guia_embarazo_parto"
+
+# --- Model and Vector Store Configuration ---
+
+# Configure OpenAI models
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+# Use a more creative model for HyDE document generation
+llm_hyde = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
+# Use a powerful model for final answer generation
+llm_answer = ChatOpenAI(model_name="gpt-4o", temperature=0)
+
+# Load ChromaDB vector store
+vectorstore = Chroma(
+    persist_directory=str(chroma_db_dir),
+    embedding_function=embeddings,
+    collection_name=collection_name,
+)
+
+# Configure the semantic retriever
+retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
 
-class HyDERAG:
-    """HyDE RAG that generates hypothetical documents for better retrieval."""
+# --- Prompt Templates ---
 
-    def __init__(self):
-        # Rutas y nombres
-        self.script_dir = Path(__file__).resolve().parent
-        self.chroma_db_dir = self.script_dir.parent / "Data" / "embeddings" / "chroma_db"
-        self.collection_name = "guia_embarazo_parto"
+# Prompt for generating the hypothetical document
+hyde_prompt_template = """
+You are a medical expert writing a detailed section for a medical guide on pregnancy and childbirth.
 
-        # Modelos
-        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        # Más creativo para HyDE
-        self.llm_hyde = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
-        self.llm_answer = ChatOpenAI(model_name="gpt-4o", temperature=0)
+Based on this question: {question}
 
-        # Cargar ChromaDB
-        self.vectorstore = Chroma(
-            persist_directory=str(self.chroma_db_dir),
-            embedding_function=self.embeddings,
-            collection_name=self.collection_name,
-        )
+Write a detailed and comprehensive medical document that would perfectly answer this question.
+The document should include:
+- Accurate medical information on the topic
+- Relevant clinical details
+- Appropriate medical recommendations
+- Important considerations for maternal health
+- Practical information and advice
 
-        # Retriever semántico
-        self.retriever = self.vectorstore.as_retriever(
-            search_kwargs={"k": 5}
-        )
+Write the document as if it were part of an official medical guide on pregnancy and childbirth.
+Be specific, detailed, and use appropriate medical terminology.
 
-        print("Sistema RAG HyDE inicializado.")
-        print(
-            f"   Documentos en base de datos: {self.vectorstore._collection.count()}")
+HYPOTHETICAL DOCUMENT:
+"""
+hyde_prompt = ChatPromptTemplate.from_template(hyde_prompt_template)
 
-    def generate_hypothetical_document(self, query: str) -> tuple:
-        """Genera un documento hipotético basado en la pregunta y retorna métricas."""
-        hyde_prompt = ChatPromptTemplate.from_template("""
-        Eres un experto médico escribiendo una sección detallada de una guía médica sobre embarazo y parto.
+# Prompt for generating the final answer
+qa_template = """
+You are an expert in maternal health and pregnancy. Analyze the following medical context and answer the question accurately and in detail.
 
-        Basándote en esta pregunta: {question}
+INSTRUCTIONS:
+- Use ONLY the information provided in the context.
+- If the information is sufficient, provide a detailed answer.
+- If there is not enough information, state that clearly.
+- Remember that you are a medical specialist answering queries about pregnancy and childbirth.
 
-        Escribe un documento médico detallado y completo que respondería perfectamente a esta pregunta.
-        El documento debe incluir:
-        - Información médica precisa sobre el tema
-        - Detalles clínicos relevantes
-        - Recomendaciones médicas apropiadas
-        - Consideraciones importantes para la salud materna
-        - Información práctica y consejos
-
-        Escribe el documento como si fuera parte de una guía médica oficial sobre embarazo y parto.
-        Sé específico, detallado y usa terminología médica apropiada.
-
-        DOCUMENTO HIPOTÉTICO:
-        """)
-
-        with get_openai_callback() as cb:
-            response = (hyde_prompt | self.llm_hyde |
-                        StrOutputParser()).invoke({"question": query})
-
-        hypothetical_doc = response.strip()
-
-        return {
-            'document': hypothetical_doc,
-            'input_tokens': cb.prompt_tokens,
-            'output_tokens': cb.completion_tokens,
-            'cost': cb.total_cost
-        }
-
-    def search_with_hyde(self, query: str) -> tuple:
-        """Realiza búsqueda usando HyDE: genera documento hipotético y lo usa para buscar."""
-        print(f"Pregunta original: '{query}'")
-
-        # 1. Generar documento hipotético con métricas
-        print("Generando documento hipotético...")
-        hyde_result = self.generate_hypothetical_document(query)
-
-        hypothetical_doc = hyde_result['document']
-        print(
-            f"Documento hipotético generado ({len(hypothetical_doc)} caracteres)")
-        print(f"   - Tokens prompt: {hyde_result['input_tokens']}")
-        print(f"   - Tokens respuesta: {hyde_result['output_tokens']}")
-        print(f"   - Costo generación: ${hyde_result['cost']:.6f}")
-
-        # Mostrar preview del documento hipotético
-        print(f"\n--- DOCUMENTO HIPOTÉTICO (primeros 300 caracteres) ---")
-        print(hypothetical_doc[:300] +
-              "..." if len(hypothetical_doc) > 300 else hypothetical_doc)
-        print("--- FIN DOCUMENTO HIPOTÉTICO ---\n")
-
-        # 2. Usar el documento hipotético para búsqueda semántica
-        print("Buscando documentos similares al documento hipotético...")
-        retrieved_docs = self.retriever.invoke(hypothetical_doc)
-
-        print(f"Documentos encontrados: {len(retrieved_docs)}")
-
-        # Retornar documentos y métricas de HyDE
-        return retrieved_docs, hyde_result
-
-
-# ----------------------------- Cadena RAG ----------------------------- #
-_instance = HyDERAG()
-
-# Template para respuesta final
-template = """
-Eres un experto en salud materna y embarazo. Analiza el siguiente contexto médico y responde la pregunta de manera precisa y detallada.
-
-INSTRUCCIONES:
-- Usa ÚNICAMENTE la información proporcionada en el contexto.
-- Si la información es suficiente, proporciona una respuesta detallada.
-- Si no hay información suficiente, indícalo claramente.
-- Recuerda que eres un especialista médico respondiendo consultas sobre embarazo y parto.
-
-CONTEXTO MÉDICO:
+MEDICAL CONTEXT:
 {context}
 
-PREGUNTA: {question}
+QUESTION: {question}
 
-RESPUESTA MÉDICA DETALLADA:
+DETAILED MEDICAL ANSWER:
 """
+qa_prompt = ChatPromptTemplate.from_template(qa_template)
 
-_prompt = ChatPromptTemplate.from_template(template)
+
+# --- Core Functions ---
+
+def generate_hypothetical_document(query: str) -> Dict[str, Any]:
+    """
+    Generates a hypothetical document based on the user's query.
+
+    Args:
+        query (str): The user's question.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing the generated document and token/cost metrics.
+    """
+    with get_openai_callback() as cb:
+        response = (hyde_prompt | llm_hyde | StrOutputParser()
+                    ).invoke({"question": query})
+
+    hypothetical_doc = response.strip()
+
+    return {
+        'document': hypothetical_doc,
+        'input_tokens': cb.prompt_tokens,
+        'output_tokens': cb.completion_tokens,
+        'cost': cb.total_cost
+    }
 
 
-def _format_docs(docs_and_hyde) -> str:
-    """Formatea los documentos para ser incluidos en el prompt."""
-    docs, hyde_result = docs_and_hyde
+def format_docs(docs: List[Any]) -> str:
+    """
+    Formats the retrieved documents to be included in the final prompt.
 
+    Args:
+        docs (list): A list of retrieved LangChain Document objects.
+
+    Returns:
+        str: A formatted string containing the content of the documents.
+    """
     formatted_docs = []
     for i, doc in enumerate(docs):
         source = doc.metadata.get('source', 'N/A')
         page = doc.metadata.get('page_number', 'N/A')
 
-        formatted_doc = f"""--- Documento {i+1} ---
-Fuente: {source}, Página: {page}
-Contenido: {doc.page_content}"""
+        formatted_doc = f"""--- Document {i+1} ---
+Source: {source}, Page: {page}
+Content: {doc.page_content}"""
         formatted_docs.append(formatted_doc)
 
     return "\n\n".join(formatted_docs)
 
 
-# Función principal que maneja todo el proceso HyDE
-def process_hyde_query(query: str):
-    """Procesa una consulta usando HyDE y retorna respuesta con métricas completas."""
-    print(f"Pregunta original: '{query}'")
+def process_hyde_query(query: str) -> Dict[str, Any]:
+    """
+    Processes a query using the full HyDE RAG pipeline.
 
-    # 1. Generar documento hipotético con métricas
-    print("Generando documento hipotético...")
-    hyde_result = _instance.generate_hypothetical_document(query)
+    Args:
+        query (str): The user's question.
 
+    Returns:
+        Dict[str, Any]: A dictionary with the final answer, contexts, and detailed metrics.
+    """
+    # 1. Generate hypothetical document
+    hyde_result = generate_hypothetical_document(query)
     hypothetical_doc = hyde_result['document']
-    print(
-        f"Documento hipotético generado ({len(hypothetical_doc)} caracteres)")
-    print(f"   - Tokens prompt: {hyde_result['input_tokens']}")
-    print(f"   - Tokens respuesta: {hyde_result['output_tokens']}")
-    print(f"   - Costo generación: ${hyde_result['cost']:.6f}")
 
-    # Mostrar preview del documento hipotético
-    print(f"\n--- DOCUMENTO HIPOTÉTICO (primeros 300 caracteres) ---")
-    print(hypothetical_doc[:300] +
-          "..." if len(hypothetical_doc) > 300 else hypothetical_doc)
-    print("--- FIN DOCUMENTO HIPOTÉTICO ---\n")
+    # 2. Retrieve similar documents
+    retrieved_docs = retriever.invoke(hypothetical_doc)
 
-    # 2. Buscar documentos similares
-    print("Buscando documentos similares al documento hipotético...")
-    retrieved_docs = _instance.retriever.invoke(hypothetical_doc)
-    print(f"Documentos encontrados: {len(retrieved_docs)}")
+    # 3. Format context
+    formatted_context = format_docs(retrieved_docs)
 
-    # 3. Formatear contexto
-    formatted_context = _format_docs((retrieved_docs, hyde_result))
-
-    # 4. Generar respuesta final con métricas
+    # 4. Generate final answer
     with get_openai_callback() as cb_answer:
-        response = _instance.llm_answer.invoke(_prompt.format_messages(
+        response = llm_answer.invoke(qa_prompt.format_messages(
             context=formatted_context,
             question=query
         ))
 
-    # Retornar respuesta y todas las métricas
+    # 5. Return response and all metrics
     return {
         'answer': response.content,
-        # Add contexts for RAGAS
         'contexts': [doc.page_content for doc in retrieved_docs],
+        'hypothetical_document': hypothetical_doc,
         'hyde_metrics': hyde_result,
         'answer_metrics': {
             'input_tokens': cb_answer.prompt_tokens,
@@ -218,92 +190,33 @@ def process_hyde_query(query: str):
     }
 
 
-if __name__ == "__main__":
-    print("\n=== RAG con HyDE (Hypothetical Document Embeddings) ===")
-    print("Este sistema genera un documento hipotético basado en tu pregunta")
-    print("y luego busca documentos similares a ese documento hipotético.")
-    print("\nEscribe tu pregunta o 'salir' para terminar.")
-
-    query = input("\nPregunta: ")
-
-    if query.lower() != "salir":
-        start_time = time.time()
-        result = process_hyde_query(query)
-        end_time = time.time()
-
-        print("\n" + "="*50)
-        print("RESPUESTA:")
-        print(result['answer'])
-        print("\n" + "="*50)
-
-        # Mostrar métricas detalladas
-        print("\n MÉTRICAS DETALLADAS:")
-        print(f"     Tiempo total: {end_time - start_time:.2f} segundos")
-
-        print(f"\n GENERACIÓN DOCUMENTO HIPOTÉTICO:")
-        print(
-            f"   - Tokens entrada (prompt): {result['hyde_metrics']['input_tokens']}")
-        print(
-            f"   - Tokens salida (documento): {result['hyde_metrics']['output_tokens']}")
-        print(f"   - Costo: ${result['hyde_metrics']['cost']:.6f}")
-
-        print(f"\n GENERACIÓN RESPUESTA FINAL:")
-        print(
-            f"   - Tokens entrada (prompt): {result['answer_metrics']['input_tokens']}")
-        print(
-            f"   - Tokens salida (respuesta): {result['answer_metrics']['output_tokens']}")
-        print(f"   - Costo: ${result['answer_metrics']['cost']:.6f}")
-
-        print(f"\n TOTALES:")
-        print(f"   - Tokens entrada total: {result['total_input_tokens']}")
-        print(f"   - Tokens salida total: {result['total_output_tokens']}")
-        print(f"   - Costo total (USD): ${result['total_cost']:.6f}")
-
-    else:
-        print("Sistema finalizado.")
-
-
 def query_for_evaluation(question: str) -> dict:
     """
-    Función específica para evaluación con RAGAS.
-    Retorna estructura completa: pregunta, respuesta, contextos y metadatos.
-    
+    A wrapper function for RAG evaluation frameworks like Ragas.
+
+    This function processes a question and returns a dictionary structured for
+    easy integration with evaluation tools.
+
     Args:
-        question (str): La pregunta a procesar
-        
+        question (str): The question to process.
+
     Returns:
-        dict: Estructura con question, answer, contexts, source_documents y metadata
+        dict: A dictionary containing the question, answer, contexts, and metadata.
     """
-    print(f"Evaluating: {question[:60]}...")
-    
-    # Medir tiempo de ejecución y tracking completo
-    import time
-    from langchain_community.callbacks import get_openai_callback
-    
     start_time = time.time()
-    
-    # process_hyde_query ya tiene tracking interno, no necesitamos callback externo
     result = process_hyde_query(question)
-    
-    # Calcular tiempo total
     end_time = time.time()
     execution_time = end_time - start_time
-    
-    print(f"Evaluation completed in {execution_time:.2f}s")
-    
-    # Retornar estructura completa para RAGAS
+
     return {
         "question": question,
         "answer": result["answer"],
-        "contexts": result["contexts"],  # Ya incluido en process_hyde_query
+        "contexts": result["contexts"],
         "metadata": {
             "execution_time": execution_time,
             "input_tokens": result["total_input_tokens"],
             "output_tokens": result["total_output_tokens"],
-            # "embedding_tokens": 0,  # Comentado temporalmente
             "total_cost": result["total_cost"],
-            
-            # Metadatos específicos de HyDE
             "retrieval_method": "hyde",
             "llm_hyde_model": "gpt-3.5-turbo",
             "llm_answer_model": "gpt-4o",
@@ -311,3 +224,58 @@ def query_for_evaluation(question: str) -> dict:
             "answer_cost": result["answer_metrics"]["cost"]
         }
     }
+
+
+# --- Main Execution Block ---
+
+if __name__ == "__main__":
+    print("\n=== RAG with HyDE (Hypothetical Document Embeddings) ===")
+    print("This system generates a hypothetical document based on your question")
+    print("and then searches for documents similar to that hypothetical document.")
+    try:
+        print(f"Documents in the database: {vectorstore._collection.count()}")
+    except Exception as e:
+        print(f"Could not retrieve document count: {e}")
+    print("\nType your question or 'exit' to finish.")
+
+    while True:
+        query = input("\nQuestion: ")
+        if query.lower() == "exit":
+            break
+
+        start_time = time.time()
+        result = process_hyde_query(query)
+        end_time = time.time()
+
+        print("\n" + "="*50)
+        print("HYPOTHETICAL DOCUMENT (Preview):")
+        print(result['hypothetical_document'][:300] + "...")
+        print("\n" + "="*50)
+        print("FINAL ANSWER:")
+        print(result['answer'])
+        print("\n" + "="*50)
+
+        # Display detailed metrics
+        print("\n DETAILED METRICS:")
+        print(f"     Total time: {end_time - start_time:.2f} seconds")
+
+        print("\n HYPOTHETICAL DOCUMENT GENERATION:")
+        print(
+            f"   - Input Tokens (prompt): {result['hyde_metrics']['input_tokens']}")
+        print(
+            f"   - Output Tokens (document): {result['hyde_metrics']['output_tokens']}")
+        print(f"   - Cost: ${result['hyde_metrics']['cost']:.6f}")
+
+        print("\n FINAL ANSWER GENERATION:")
+        print(
+            f"   - Input Tokens (prompt): {result['answer_metrics']['input_tokens']}")
+        print(
+            f"   - Output Tokens (answer): {result['answer_metrics']['output_tokens']}")
+        print(f"   - Cost: ${result['answer_metrics']['cost']:.6f}")
+
+        print("\n TOTALS:")
+        print(f"   - Total Input Tokens: {result['total_input_tokens']}")
+        print(f"   - Total Output Tokens: {result['total_output_tokens']}")
+        print(f"   - Total Cost (USD): ${result['total_cost']:.6f}")
+
+    print("\nSystem finished.")

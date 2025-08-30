@@ -1,12 +1,16 @@
 """
-Simple Semantic RAG using only semantic search with ChromaDB.
+Simple Semantic RAG - A basic RAG pipeline using semantic search with ChromaDB.
 
+This script implements a simple RAG (Retrieval-Augmented Generation) pipeline.
+It uses a semantic retriever to find relevant documents in a ChromaDB vector
+store and then uses a language model to generate an answer based on the
+retrieved context.
 """
 
 import os
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -14,200 +18,195 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 
-# Cargar variables de entorno
+# --- Environment and Path Configuration ---
+
+# Load environment variables from .env file
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 if not os.getenv("OPENAI_API_KEY"):
-    raise ValueError("OPENAI_API_KEY no encontrada en el archivo .env")
+    raise ValueError("OPENAI_API_KEY not found in the .env file")
+
+# Define paths
+script_dir = Path(__file__).resolve().parent
+chroma_db_dir = script_dir.parent / "Data" / "embeddings" / "chroma_db"
+collection_name = "guia_embarazo_parto"
+
+# --- Model and Vector Store Configuration ---
+
+# Configure OpenAI models
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
+
+# Load ChromaDB vector store
+vectorstore = Chroma(
+    persist_directory=str(chroma_db_dir),
+    embedding_function=embeddings,
+    collection_name=collection_name,
+)
+
+# Configure the semantic retriever
+retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
 
-class SimpleSemanticRAG:
-    """Simple semantic RAG using only ChromaDB for retrieval."""
+# --- Prompt Templates ---
 
-    def __init__(self):
-        # Rutas y nombres
-        self.script_dir = Path(__file__).resolve().parent
-        self.chroma_db_dir = self.script_dir.parent / "Data" / "embeddings" / "chroma_db"
-        self.collection_name = "guia_embarazo_parto"
+# Prompt for generating the final answer
+qa_template = """
+You are an expert in maternal health and pregnancy. Analyze the following medical context and answer the question accurately and in detail.
 
-        # Modelos
-        self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        self.llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
+INSTRUCTIONS:
+- Use ONLY the information provided in the context.
+- If the information is sufficient, provide a detailed answer.
+- If there is not enough information, state that clearly.
+- Remember that you are a medical specialist answering queries about pregnancy and childbirth.
 
-        # Cargar ChromaDB
-        self.vectorstore = Chroma(
-            persist_directory=str(self.chroma_db_dir),
-            embedding_function=self.embeddings,
-            collection_name=self.collection_name,
-        )
-
-        # Retriever semántico
-        self.retriever = self.vectorstore.as_retriever(
-            search_kwargs={"k": 5}
-        )
-
-        print("✅ Sistema RAG semántico simple inicializado.")
-        print(
-            f"   📄 Documentos en base de datos: {self.vectorstore._collection.count()}")
-
-    def search(self, query: str) -> List[Document]:
-        """Realiza una búsqueda semántica usando ChromaDB."""
-        print(f"Consultando: '{query}'")
-        return self.retriever.invoke(query)
-
-
-# ----------------------------- Cadena RAG ----------------------------- #
-_instance = SimpleSemanticRAG()
-
-template = """
-Eres un experto en salud materna y embarazo. Analiza el siguiente contexto médico y responde la pregunta de manera precisa y detallada.
-
-INSTRUCCIONES:
-- Usa ÚNICAMENTE la información proporcionada en el contexto.
-- Si la información es suficiente, proporciona una respuesta detallada.
-- Si no hay información suficiente, indícalo claramente.
-
-CONTEXTO MÉDICO:
+MEDICAL CONTEXT:
 {context}
 
-PREGUNTA: {question}
+QUESTION: {question}
 
-RESPUESTA DETALLADA:
+DETAILED MEDICAL ANSWER:
 """
+qa_prompt = ChatPromptTemplate.from_template(qa_template)
 
-_prompt = ChatPromptTemplate.from_template(template)
 
+# --- Core Functions ---
 
-def _format_docs(docs: List[Document]) -> str:
-    """Formatea los documentos para ser incluidos en el prompt."""
+def format_docs(docs: List[Document]) -> str:
+    """
+    Formats the retrieved documents to be included in the final prompt.
+
+    Args:
+        docs (list): A list of retrieved LangChain Document objects.
+
+    Returns:
+        str: A formatted string containing the content of the documents.
+    """
     formatted_docs = []
     for i, doc in enumerate(docs):
         source = doc.metadata.get('source', 'N/A')
         page = doc.metadata.get('page_number', 'N/A')
 
-        formatted_doc = f"""--- Documento {i+1} ---
-Fuente: {source}, Página: {page}
-Contenido: {doc.page_content}"""
+        formatted_doc = f"""--- Document {i+1} ---
+Source: {source}, Page: {page}
+Content: {doc.page_content}"""
         formatted_docs.append(formatted_doc)
 
     return "\n\n".join(formatted_docs)
 
 
-# Definición de la cadena RAG
-rag_chain = (
-    {"context": RunnableLambda(_instance.search) |
-     _format_docs, "question": RunnablePassthrough()}
-    | _prompt
-    | _instance.llm
-    | StrOutputParser()
-)
+def process_semantic_query(query: str) -> Dict[str, Any]:
+    """
+    Processes a query using the simple semantic RAG pipeline.
 
+    Args:
+        query (str): The user's question.
 
-if __name__ == "__main__":
-    print("\n=== RAG Semántico Simple ===")
-    print("Escribe tu pregunta o 'salir' para terminar.")
+    Returns:
+        Dict[str, Any]: A dictionary with the final answer, contexts, and detailed metrics.
+    """
+    # 1. Retrieve similar documents
+    retrieved_docs = retriever.invoke(query)
 
-    query = input("\nPregunta: ")
+    # 2. Format context
+    formatted_context = format_docs(retrieved_docs)
 
-    if query.lower() != "salir":
-        start_time = time.time()
-        with get_openai_callback() as cb:
-            answer = rag_chain.invoke(query)
+    # 3. Generate final answer
+    with get_openai_callback() as cb_answer:
+        response = llm.invoke(qa_prompt.format_messages(
+            context=formatted_context,
+            question=query
+        ))
 
-        end_time = time.time()
-
-        print("\n" + "="*50)
-        print("RESPUESTA:")
-        print(answer)
-        print("\n" + "="*50)
-        print("\nEstadísticas de la consulta:")
-        print(f"   - Tiempo total: {end_time - start_time:.2f} segundos")
-        print(f"   - Tokens de entrada (prompt): {cb.prompt_tokens}")
-        print(f"   - Tokens de salida (respuesta): {cb.completion_tokens}")
-        print(f"   - Costo total (USD): ${cb.total_cost:.6f}")
-    else:
-        print("Sistema finalizado.")
+    # 4. Return response and all metrics
+    return {
+        'answer': response.content,
+        'contexts': [doc.page_content for doc in retrieved_docs],
+        'retrieved_documents': retrieved_docs,
+        'metrics': {
+            'input_tokens': cb_answer.prompt_tokens,
+            'output_tokens': cb_answer.completion_tokens,
+            'cost': cb_answer.total_cost
+        }
+    }
 
 
 def query_for_evaluation(question: str) -> dict:
     """
-    Función específica para evaluación con RAGAS.
-    Retorna estructura completa: pregunta, respuesta, contextos y metadatos.
-    
+    A wrapper function for RAG evaluation frameworks like Ragas.
+
+    This function processes a question and returns a dictionary structured for
+    easy integration with evaluation tools. The output structure is preserved
+    to match the original implementation for consistency.
+
     Args:
-        question (str): La pregunta a procesar
-        
+        question (str): The question to process.
+
     Returns:
-        dict: Estructura con question, answer, contexts, source_documents y metadata
+        dict: A dictionary containing the question, answer, contexts, and metadata.
     """
-    print(f"Evaluating: {question[:60]}...")
-    
-    # Medir tiempo de ejecución
-    import time
     start_time = time.time()
-    
-    # Tracking completo de tokens (embeddings + LLM)
-    embedding_tokens = 0
-    llm_tokens_input = 0
-    llm_tokens_output = 0
-    total_cost = 0.0
-    embedding_cost = 0.0
-    llm_cost = 0.0
-    
-    # Tracking conjunto de embeddings + LLM (la cadena RAG incluye ambos)
-    with get_openai_callback() as full_cb:
-        # 1. Obtener contextos (esto genera embeddings para la query)
-        retrieved_docs = _instance.search(question)
-        contexts = [doc.page_content for doc in retrieved_docs]
-        
-        # 2. Generar respuesta directamente (sin duplicar embeddings)
-        formatted_context = _format_docs(retrieved_docs)
-        response = _instance.llm.invoke(_prompt.format_messages(
-            context=formatted_context,
-            question=question
-        ))
-        answer = response.content
-    
-    # Usar datos reales del callback (sin estimaciones)
-    llm_tokens_input = full_cb.prompt_tokens
-    llm_tokens_output = full_cb.completion_tokens
-    total_cost = full_cb.total_cost
-    embedding_tokens = 0  # No estimamos, dejamos en 0
-    embedding_cost = 0.0
-    llm_cost = total_cost
-    
-    # Calcular tiempo total
+    result = process_semantic_query(question)
     end_time = time.time()
     execution_time = end_time - start_time
-    
-    print(f"Evaluation completed in {execution_time:.2f}s")
-    print(f"📊 Tokens: LLM_input={llm_tokens_input}, LLM_output={llm_tokens_output}")
-    print(f"💰 Total cost: ${total_cost:.6f}")
-    
-    # Retornar estructura completa para RAGAS
+
+    input_tokens = result["metrics"]["input_tokens"]
+    output_tokens = result["metrics"]["output_tokens"]
+
     return {
         "question": question,
-        "answer": answer,
-        "contexts": contexts,
-        "source_documents": retrieved_docs,  # Documentos completos con metadata
+        "answer": result["answer"],
+        "contexts": result["contexts"],
+        "source_documents": result["retrieved_documents"],
         "metadata": {
-            "num_contexts": len(contexts),
+            "num_contexts": len(result["contexts"]),
             "retrieval_method": "semantic_only",
             "llm_model": "gpt-4o",
             "embedding_model": "text-embedding-3-small",
-            
-            # Métricas de rendimiento para export
             "execution_time": execution_time,
-            "input_tokens": llm_tokens_input,
-            "output_tokens": llm_tokens_output,
-            # "embedding_tokens": 0,  # Comentado temporalmente
-            "total_cost": total_cost,
-            
-            # Métricas legacy (mantener compatibilidad)
-            "tokens_used": llm_tokens_input + llm_tokens_output,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_cost": result["metrics"]["cost"],
+            "tokens_used": input_tokens + output_tokens,
         }
     }
+
+
+# --- Main Execution Block ---
+
+if __name__ == "__main__":
+    print("\n=== Simple Semantic RAG ===")
+    print("This system uses semantic search to retrieve relevant documents and generate an answer.")
+    try:
+        print(f"Documents in the database: {vectorstore._collection.count()}")
+    except Exception as e:
+        print(f"Could not retrieve document count: {e}")
+    print("\nType your question or 'exit' to finish.")
+
+    while True:
+        query = input("\nQuestion: ")
+        if query.lower() == "exit":
+            break
+
+        start_time = time.time()
+        result = process_semantic_query(query)
+        end_time = time.time()
+
+        print("\n" + "="*50)
+        print("ANSWER:")
+        print(result['answer'])
+        print("\n" + "="*50)
+
+        # Display detailed metrics
+        print("\n DETAILED METRICS:")
+        print(f"     Total time: {end_time - start_time:.2f} seconds")
+        print(
+            f"   - Input Tokens (prompt): {result['metrics']['input_tokens']}")
+        print(
+            f"   - Output Tokens (answer): {result['metrics']['output_tokens']}")
+        print(f"   - Total Cost (USD): ${result['metrics']['cost']:.6f}")
+
+    print("\nSystem finished.")

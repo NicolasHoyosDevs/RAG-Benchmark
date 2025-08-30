@@ -1,480 +1,320 @@
+"""
+RAG with Multi-Query Rewriting for enhanced retrieval.
+
+This script implements a RAG pipeline that uses a multi-query rewriting
+strategy to improve document retrieval. It generates several variations of the
+user's question, retrieves documents for each variation, and then synthesizes
+an answer based on the combined, re-ranked results.
+"""
+
 import os
 import time
-from dotenv import load_dotenv
 from pathlib import Path
+from typing import List, Dict, Any
+
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.vectorstores import Chroma
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.documents import Document
-from typing import List, Dict, Any
-# Cargar configuración
-# Construir ruta absoluta al archivo .env en el directorio raíz
+
+# --- Environment and Path Configuration ---
+
+# Load environment variables from .env file
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Verificar que la API key se haya cargado
-if not OPENAI_API_KEY:
-    print(f"Error: OPENAI_API_KEY not found in {ENV_PATH}")
-    print("Please verify that the .env file exists and contains: OPENAI_API_KEY=your_key")
-    exit(1)
+if not os.getenv("OPENAI_API_KEY"):
+    raise ValueError("OPENAI_API_KEY not found in the .env file")
 
-# Configuración de ChromaDB (basada en los archivos existentes)
-SCRIPT_DIR = Path(__file__).resolve().parent
-DB_DIRECTORY = SCRIPT_DIR.parent / "Data" / "embeddings" / "chroma_db"
+# --- ChromaDB Configuration ---
+DB_DIRECTORY = Path(__file__).resolve().parent.parent / \
+    "Data" / "embeddings" / "chroma_db"
 COLLECTION_NAME = "guia_embarazo_parto"
 
-# --- Sistema de Tracking Simplificado ---
+# --- Model and Vector Store Configuration ---
 
+# Initialize embeddings
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
-class SimpleTracker:
-    """Sistema simple para rastrear tokens y costos de cada operacion"""
+# Load ChromaDB vector store
+try:
+    vectorstore = Chroma(
+        persist_directory=str(DB_DIRECTORY),
+        embedding_function=embeddings,
+        collection_name=COLLECTION_NAME
+    )
+except Exception as e:
+    print(f"Error loading ChromaDB: {e}")
+    vectorstore = None
 
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        """Reinicia las estadisticas"""
-        self.total_input_tokens = 0
-        self.total_output_tokens = 0
-        self.total_embedding_tokens = 0
-        self.total_cost = 0.0
-        self.operations = []
-
-    def add_operation(self, name: str, input_tokens: int, output_tokens: int, cost: float):
-        """Agrega una operacion al tracking"""
-        self.total_input_tokens += input_tokens
-        self.total_output_tokens += output_tokens
-        self.total_cost += cost
-
-        operation = {
-            "name": name,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cost": cost
-        }
-        self.operations.append(operation)
-
-    def add_embedding_operation(self, name: str, tokens: int, cost: float):
-        """Agrega una operacion de embedding al tracking usando datos reales de OpenAI callback"""
-        self.total_embedding_tokens += tokens
-        self.total_cost += cost
-        
-        operation = {
-            "name": name,
-            "embedding_tokens": tokens,
-            "cost": cost
-        }
-        self.operations.append(operation)
-
-    def show_summary(self):
-        """Muestra resumen total"""
-        print(f"\nToken Usage Summary:")
-        print(f"  Input tokens: {self.total_input_tokens}")
-        print(f"  Output tokens: {self.total_output_tokens}")
-        print(f"  Embedding tokens: {self.total_embedding_tokens}")
-        print(f"  Total cost: ${self.total_cost:.6f}")
-
-
-# Inicializar tracker global
-tracker = SimpleTracker()
-
-# --- Configuración del Retriever Base ---
-base_retriever = None  # Se inicializará después de la clase ChromaRetriever
-
-# --- Retriever ChromaDB ---
-
-
-class ChromaRetriever:
-    def __init__(self, db_directory: str, collection_name: str, k: int = 5, score_threshold: float = 0.05):
-        self.db_directory = db_directory
-        self.collection_name = collection_name
-        self.k = k
-        self.score_threshold = score_threshold  # Nuevo: threshold de similaridad
-
-        # Inicializar embeddings (mismo modelo que create_embeddings.py)
-        self.embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            api_key=OPENAI_API_KEY
-        )
-
-        # Cargar base de datos
-        self._load_db()
-
-    def _load_db(self):
-        """Carga la base de datos ChromaDB"""
-        try:
-            self.db = Chroma(
-                persist_directory=str(self.db_directory),
-                embedding_function=self.embeddings,
-                collection_name=self.collection_name
-            )
-            print(f"Database loaded: {self.db._collection.count()} documents")
-        except Exception as e:
-            print(f"Error loading database: {e}")
-            self.db = None
-
-    def invoke(self, query: str) -> List[tuple]:
-        """Realiza busqueda por similitud con scores"""
-        if not self.db:
-            print("Database not available")
-            return []
-
-        try:
-            # Busqueda por similitud con scores en ChromaDB
-            results_with_scores = self.db.similarity_search_with_score(query, k=self.k)
-
-            # Convertir distancias a similaridades y aplicar filtrado
-            filtered_results = []
-            for doc, distance in results_with_scores:
-                similarity = max(0.0, 1.0 - distance)
-
-                if similarity >= self.score_threshold:
-                    # Ensure doc is a proper Document object
-                    if hasattr(doc, 'page_content') and hasattr(doc, 'metadata'):
-                        filtered_results.append((doc, similarity))
-                    else:
-                        # If not a proper Document, create one
-                        from langchain_core.documents import Document
-                        if isinstance(doc, dict):
-                            content = doc.get('page_content', doc.get('content', str(doc)))
-                            metadata = doc.get('metadata', {})
-                            proper_doc = Document(page_content=content, metadata=metadata)
-                            filtered_results.append((proper_doc, similarity))
-
-            return filtered_results
-
-        except Exception as e:
-            print(f"Database search error: {e}")
-            return []
-
-
-# --- Configuración del Retriever Base ---
-base_retriever = ChromaRetriever(
-    db_directory=DB_DIRECTORY,
-    collection_name=COLLECTION_NAME,
-    k=8,  # Aumentar k para tener más candidatos
-    score_threshold=0.05  # Threshold muy permisivo (>5% similaridad)
+# Configure the base retriever
+base_retriever = vectorstore.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={"k": 8, "score_threshold": 0.05}
 )
 
+# --- Query Rewriting Configuration ---
 
-# Configuración del rewriter con múltiples enfoques
-REPHRASE_TEMPLATE_1 = """Reescribe esta pregunta para que sea una consulta independiente y específica sobre embarazo y parto.
+REPHRASE_TEMPLATE_1 = """Rewrite this question to be a standalone, specific query about pregnancy and childbirth.
 
-Pregunta original: {question}
+Original question: {question}
 
-Instrucciones:
-- Mantén el contexto médico/obstétrico si es relevante
-- Sé específico y claro en términos médicos
-- Enfócate en embarazo, parto, control prenatal, o salud materna
-- Asegúrate de que la pregunta sea completa y autocontenida
+Instructions:
+- Maintain the medical/obstetric context if relevant.
+- Be specific and clear in medical terms.
+- Focus on pregnancy, childbirth, prenatal care, or maternal health.
+- Ensure the question is complete and self-contained.
 
-Pregunta independiente:"""
+Standalone question:"""
 
-REPHRASE_TEMPLATE_2 = """Reformula esta pregunta sobre embarazo y parto usando sinónimos y términos médicos alternativos.
+REPHRASE_TEMPLATE_2 = """Rephrase this question about pregnancy and childbirth using synonyms and alternative medical terms.
 
-Pregunta original: {question}
+Original question: {question}
 
-Instrucciones:
-- Usa terminología médica precisa
-- Incluye sinónimos y términos alternativos
-- Mantén el significado pero cambia la formulación
-- Enfócate en aspectos clínicos y obstétricos
+Instructions:
+- Use precise medical terminology.
+- Include synonyms and alternative terms.
+- Maintain the meaning but change the wording.
+- Focus on clinical and obstetric aspects.
 
-Pregunta reformulada:"""
+Rephrased question:"""
 
-REPHRASE_TEMPLATE_3 = """Amplía esta pregunta para incluir aspectos relacionados y contexto adicional sobre embarazo y parto.
+REPHRASE_TEMPLATE_3 = """Expand this question to include related aspects and additional context about pregnancy and childbirth.
 
-Pregunta base: {question}
+Base question: {question}
 
-Instrucciones:
-- Amplía la pregunta para incluir aspectos relacionados
-- Agrega contexto sobre complicaciones, prevención o cuidados
-- Incluye posibles variaciones o casos especiales
-- Mantén el foco en salud materna y perinatal
+Instructions:
+- Expand the question to include related aspects.
+- Add context about complications, prevention, or care.
+- Include possible variations or special cases.
+- Keep the focus on maternal and perinatal health.
 
-Pregunta ampliada:"""
+Expanded question:"""
 
-# Crear los prompts para cada variación
 REPHRASE_PROMPTS = [
     PromptTemplate.from_template(REPHRASE_TEMPLATE_1),
     PromptTemplate.from_template(REPHRASE_TEMPLATE_2),
     PromptTemplate.from_template(REPHRASE_TEMPLATE_3)
 ]
 
-llm_rewriter = ChatOpenAI(model_name="gpt-3.5-turbo",
-                          temperature=0.3, api_key=OPENAI_API_KEY)
+llm_rewriter = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.3)
+llm_answer = ChatOpenAI(model_name="gpt-4o", temperature=0)
 
 
-def contextual_retriever(question: str, max_final_docs: int = 8) -> List:
-    """Retriever que reescribe consultas multiples veces para mejor recuperacion con filtrado por relevancia"""
-    
-    # Generar multiples reescrituras de la consulta
-    rewritten_queries = []
+# --- Final Answer Prompt ---
 
-    for i, prompt in enumerate(REPHRASE_PROMPTS, 1):
-        # Usar callback individual para cada reescritura
-        with get_openai_callback() as cb:
-            rewritten_query = (prompt | llm_rewriter | StrOutputParser()).invoke(
-                {"question": question}).strip()
+qa_template = """
+You are a medical specialist expert in pregnancy and childbirth. Analyze ONLY the provided context and answer the question accurately and directly.
 
-        rewritten_queries.append(rewritten_query)
+STRICT RULES:
+1. Answer the question DIRECTLY using ONLY the information from the context.
+2. PRIORITIZE Documents 1 and 2 as they have the highest relevance to the question.
+3. DO NOT add external knowledge that is not in the context.
+4. If there are specific data (dosages, numbers, protocols), include them exactly as they appear.
 
-        # Registrar la operacion de reescritura
-        tracker.add_operation(
-            f"Reescritura {i}",
-            cb.prompt_tokens,
-            cb.completion_tokens,
-            cb.total_cost
-        )
+PRIORITY ORDER:
+- Documents 1-2: HIGH relevance - use as the main source.
+- Documents 3-4: MEDIUM relevance - use as a supplement.
+- Documents 5+: LOW relevance - use only if necessary.
 
-    print(f"Generated {len(rewritten_queries)} query variations:")
-    for i, query in enumerate(rewritten_queries, 1):
-        print(f"  {i}. {query}")
-    print()
+RESPONSE FORMAT:
+1. Direct answer to the question (based mainly on Documents 1-2).
+2. Specific details from the context.
+3. Relevant related information (if applicable).
+4. Limitations of the available information (only if any).
 
-    # Buscar documentos con cada query reescrita
-    all_docs_with_scores = []
-    doc_ids_seen = set()  # Para evitar duplicados
+IMPORTANT: This information is for educational purposes and does not replace professional medical consultation.
 
-    for i, query in enumerate(rewritten_queries, 1):
-        # Usar callback para capturar tokens reales de embedding
-        with get_openai_callback() as cb:
-            docs_with_scores = base_retriever.invoke(query)
-        
-        # Registrar solo tokens reales capturados por OpenAI callback
-        if cb.total_tokens > 0:  # Para embeddings los tokens están en total_tokens
-            tracker.add_embedding_operation(f"Embedding query {i}", cb.total_tokens, cb.total_cost)
+Context from medical guides (ordered by relevance):
+{context}
 
-        # Filtrar duplicados y agregar peso por posicion de la query
-        for doc, score in docs_with_scores:
-            # Usar los primeros 100 caracteres como ID unico
-            doc_id = doc.page_content[:100]
-            if doc_id not in doc_ids_seen:
-                doc_ids_seen.add(doc_id)
+Question: {question}
 
-                # Penalizar ligeramente documentos de queries posteriores
-                query_weight = 1.0 - (i - 1) * 0.05
-                weighted_score = score * query_weight
-
-                all_docs_with_scores.append(
-                    (doc, weighted_score, f"query_{i}"))
-
-    # Ordenar por score de relevancia (mayor a menor)
-    all_docs_with_scores.sort(key=lambda x: x[1], reverse=True)
-
-    # Seleccionar los top-k mas relevantes
-    if len(all_docs_with_scores) > max_final_docs:
-        selected_docs = all_docs_with_scores[:max_final_docs]
-    else:
-        selected_docs = all_docs_with_scores
-
-    # Extraer solo los documentos (sin scores)
-    final_docs = [doc for doc, score, source in selected_docs]
-
-    print(f"Retrieved {len(final_docs)} documents")
-
-    return final_docs
+Medical answer based on the context:
+"""
+qa_prompt = ChatPromptTemplate.from_template(qa_template)
 
 
-def format_docs(docs):
-    """Formatea documentos para el contexto"""
+# --- Core Functions ---
+
+def format_docs(docs: List[Document]) -> str:
+    """Formats documents for the context, indicating relevance."""
     formatted_docs = []
     for i, doc in enumerate(docs):
-        # Ensure we have a proper Document object
-        if hasattr(doc, 'page_content') and hasattr(doc, 'metadata'):
-            source = doc.metadata.get('source', 'N/A') if isinstance(doc.metadata, dict) else 'N/A'
-            content = doc.page_content
-        else:
-            # Fallback for other formats
-            source = 'N/A'
-            content = str(doc)
-
-        formatted_doc = f"=== DOCUMENTO {i+1} (Relevancia: {'Alta' if i < 2 else 'Media' if i < 4 else 'Baja'}) ===\n"
-        formatted_doc += f"Fuente: {source}\n"
-        formatted_doc += f"Contenido: {content}"
+        source = doc.metadata.get('source', 'N/A')
+        relevance = 'High' if i < 2 else 'Medium' if i < 4 else 'Low'
+        formatted_doc = f"--- DOCUMENT {i+1} (Relevance: {relevance}) ---\n"
+        formatted_doc += f"Source: {source}\n"
+        formatted_doc += f"Content: {doc.page_content}"
         formatted_docs.append(formatted_doc)
-
     return "\n\n".join(formatted_docs)
 
 
-# Template para respuesta final (adaptado al dominio de embarazo)
-qa_template = """
-Eres un especialista medico experto en embarazo y parto. Analiza UNICAMENTE el contexto proporcionado y responde la pregunta de manera precisa y directa.
-
-REGLAS ESTRICTAS:
-1. Responde DIRECTAMENTE la pregunta usando SOLO la informacion del contexto
-2. PRIORIZA los DOCUMENTOS 1 y 2 que tienen la mayor relevancia para la pregunta
-3. NO añadidas conocimiento externo que no este en el contexto
-4. Si hay datos especificos (dosis, numeros, protocolos), incluyelos exactamente como aparecen
-
-ORDEN DE PRIORIDAD:
-- Documentos 1-2: ALTA relevancia - usalos como fuente principal
-- Documentos 3-4: MEDIA relevancia - usalos como complemento
-- Documentos 5+: BAJA relevancia - usalos solo si necesario
-
-FORMATO DE RESPUESTA:
-1. Respuesta directa a la pregunta (basandote principalmente en Documentos 1-2)
-2. Detalles especificos del contexto
-3. Informacion relacionada relevante (si aplica)
-4. Limitaciones de la informacion disponible (solo si las hay)
-
-IMPORTANTE: Esta informacion es para fines educativos y no reemplaza la consulta medica profesional.
-
-Contexto de guias medicas (ordenado por relevancia):
-{context}
-
-Pregunta: {question}
-
-Respuesta medica basada en el contexto:
-"""
-qa_prompt = ChatPromptTemplate.from_template(qa_template)
-qa_llm = ChatOpenAI(model_name="gpt-4o", temperature=0, api_key=OPENAI_API_KEY)
-
-
-def create_conversational_rag():
-    """Crear la cadena RAG conversacional con tracking detallado"""
-    def tracked_qa_chain(inputs):
-        """Wrapper que registra la respuesta final"""
-        context = inputs["context"]
-        question = inputs["question"]
-
-        # Usar callback para la respuesta final
-        with get_openai_callback() as cb:
-            response = (qa_prompt | qa_llm | StrOutputParser()).invoke({
-                "context": context,
-                "question": question
-            })
-
-        # Registrar la operacion de respuesta
-        tracker.add_operation(
-            "Respuesta final",
-            cb.prompt_tokens,
-            cb.completion_tokens,
-            cb.total_cost
-        )
-
-        return response
-
-    return (
-        {
-            "context": RunnableLambda(lambda x: contextual_retriever(x["question"])) | RunnableLambda(format_docs),
-            "question": RunnablePassthrough()
-        }
-        | RunnableLambda(tracked_qa_chain)
-    )
-
-
-def query_for_evaluation(question: str) -> dict:
+def process_rewriter_query(question: str, max_final_docs: int = 8) -> Dict[str, Any]:
     """
-    Funcion especifica para evaluacion con RAGAS.
-    Retorna estructura completa: pregunta, respuesta, contextos y metadatos.
+    Processes a query using the multi-query rewriting RAG pipeline.
 
     Args:
-        question (str): La pregunta a procesar
+        question (str): The user's question.
+        max_final_docs (int): The maximum number of documents to return.
 
     Returns:
-        dict: Estructura con question, answer, contexts, source_documents y metadata
+        Dict[str, Any]: A dictionary with the final answer, contexts, and detailed metrics.
     """
-    print(f"Evaluating: {question[:60]}...")
-    
-    # Reiniciar tracker para esta evaluación específica
-    tracker.reset()
-    
-    # Medir tiempo de ejecución
-    import time
-    start_time = time.time()
+    # 1. Generate rewritten queries and track metrics
+    rewritten_queries = []
+    rewrite_input_tokens, rewrite_output_tokens, rewrite_cost = 0, 0, 0
 
-    # Tracking completo de embeddings + LLM
-    with get_openai_callback() as cb:
-        # 1. Obtener contextos usando la reescritura multiple (incluye embeddings)
-        retrieved_docs = contextual_retriever(question)
+    for prompt in REPHRASE_PROMPTS:
+        with get_openai_callback() as cb:
+            rewritten_query = (prompt | llm_rewriter | StrOutputParser()).invoke(
+                {"question": question}).strip()
+            rewritten_queries.append(rewritten_query)
+            rewrite_input_tokens += cb.prompt_tokens
+            rewrite_output_tokens += cb.completion_tokens
+            rewrite_cost += cb.total_cost
 
-        # 2. Formatear contextos para la respuesta
-        formatted_context = format_docs(retrieved_docs)
+    # 2. Retrieve documents for each rewritten query
+    all_docs_with_scores = []
+    doc_ids_seen = set()
 
-        # 3. Generar respuesta usando el LLM
-        response = qa_llm.invoke(qa_prompt.format_messages(
-            context=formatted_context,
-            question=question
-        ))
+    for i, query in enumerate(rewritten_queries, 1):
+        results = vectorstore.similarity_search_with_score(query, k=5)
+        for doc, distance in results:
+            similarity = max(0.0, 1.0 - distance)
+            # Use a slice of content as a unique ID
+            doc_id = doc.page_content[:100]
+            if doc_id not in doc_ids_seen:
+                doc_ids_seen.add(doc_id)
+                # Penalize queries from later, more speculative prompts
+                query_weight = 1.0 - (i - 1) * 0.05
+                all_docs_with_scores.append((doc, similarity * query_weight))
 
-    # Registrar la operacion de evaluacion
-    tracker.add_operation(
-        "Evaluacion RAGAS",
-        cb.prompt_tokens,
-        cb.completion_tokens,
-        cb.total_cost
-    )
-    
-    # Calcular tiempo total
-    end_time = time.time()
-    execution_time = end_time - start_time
+    # 3. Re-rank and select the best documents
+    all_docs_with_scores.sort(key=lambda x: x[1], reverse=True)
+    retrieved_docs = [doc for doc, _ in all_docs_with_scores[:max_final_docs]]
 
-    print(f"Evaluation completed in {execution_time:.2f}s")
+    # 4. Format context and generate final answer
+    formatted_context = format_docs(retrieved_docs)
+    with get_openai_callback() as cb_answer:
+        answer = (qa_prompt | llm_answer | StrOutputParser()).invoke({
+            "context": formatted_context,
+            "question": question
+        })
 
-    # 4. Preparar lista de contextos (contenido de documentos)
-    contexts = [doc.page_content for doc in retrieved_docs]
+    # 5. Consolidate and return all information
+    total_input = rewrite_input_tokens + cb_answer.prompt_tokens
+    total_output = rewrite_output_tokens + cb_answer.completion_tokens
+    total_cost = rewrite_cost + cb_answer.total_cost
 
-    # 5. Retornar estructura completa para RAGAS
     return {
-        "question": question,
-        "answer": response.content,
-        "contexts": contexts,  # Lista de strings con el contenido de los documentos
-        "source_documents": retrieved_docs,  # Documentos completos con metadata
-        "metadata": {
-            "num_contexts": len(contexts),
-            "retrieval_method": "multi_query_rewrite",
-            "rewrite_count": 3,
-            "llm_model": "gpt-4o",
-            "rewriter_model": "gpt-3.5-turbo",
-            
-            # Métricas de rendimiento para export
-            "execution_time": execution_time,
-            "input_tokens": tracker.total_input_tokens,
-            "output_tokens": tracker.total_output_tokens,
-            # "embedding_tokens": 0,  # Comentado temporalmente
-            "total_cost": tracker.total_cost,
-            
-            # Métricas legacy (mantener compatibilidad)
-            "tokens_used": tracker.total_input_tokens + tracker.total_output_tokens,
+        'answer': answer,
+        'contexts': [doc.page_content for doc in retrieved_docs],
+        'retrieved_documents': retrieved_docs,
+        'rewritten_queries': rewritten_queries,
+        'metrics': {
+            'rewrite_input_tokens': rewrite_input_tokens,
+            'rewrite_output_tokens': rewrite_output_tokens,
+            'rewrite_cost': rewrite_cost,
+            'answer_input_tokens': cb_answer.prompt_tokens,
+            'answer_output_tokens': cb_answer.completion_tokens,
+            'answer_cost': cb_answer.total_cost,
+            'total_input_tokens': total_input,
+            'total_output_tokens': total_output,
+            'total_cost': total_cost,
         }
     }
 
 
-# Ejecución principal
+def query_for_evaluation(question: str) -> dict:
+    """
+    A wrapper function for RAG evaluation frameworks like Ragas.
+
+    This function processes a question and returns a dictionary structured for
+    easy integration with evaluation tools, preserving the original output format.
+    """
+    start_time = time.time()
+    result = process_rewriter_query(question)
+    end_time = time.time()
+    execution_time = end_time - start_time
+
+    total_input = result['metrics']['total_input_tokens']
+    total_output = result['metrics']['total_output_tokens']
+
+    return {
+        "question": question,
+        "answer": result["answer"],
+        "contexts": result["contexts"],
+        "source_documents": result["retrieved_documents"],
+        "metadata": {
+            "num_contexts": len(result["contexts"]),
+            "retrieval_method": "multi_query_rewrite",
+            "rewrite_count": len(REPHRASE_PROMPTS),
+            "llm_model": "gpt-4o",
+            "rewriter_model": "gpt-3.5-turbo",
+            "execution_time": execution_time,
+            "input_tokens": total_input,
+            "output_tokens": total_output,
+            "total_cost": result['metrics']['total_cost'],
+            "tokens_used": total_input + total_output,
+        }
+    }
+
+
+# --- Main Execution Block ---
+
 if __name__ == "__main__":
-    try:
-        print("Multi-Query RAG System for Medical Consultation")
-        print("Pregnancy and Childbirth Knowledge Base")
-        print("-" * 50)
+    print("\n=== RAG with Multi-Query Rewriter ===")
+    print("This system rewrites your question in multiple ways to improve document retrieval.")
+    if vectorstore:
+        print(
+            f"Connected to ChromaDB with {vectorstore._collection.count()} documents.")
+    print("\nType your question or 'exit' to finish.")
 
-        # Inicializar componentes
-        rag_chain = create_conversational_rag()
+    while True:
+        query = input("\nQuestion: ")
+        if query.lower() == "exit":
+            break
 
-        print("\nType 'exit' to end session")
+        start_time = time.time()
+        result = process_rewriter_query(query)
+        end_time = time.time()
 
-        while (query := input("\nQuestion: ")) != "exit":
-            print("Processing...")
+        print("\n" + "="*50)
+        print("REWRITTEN QUERIES:")
+        for i, rq in enumerate(result['rewritten_queries']):
+            print(f"  {i+1}. {rq}")
 
-            # Preparar inputs
-            inputs = {"question": query}
+        print("\n" + "="*50)
+        print("FINAL ANSWER:")
+        print(result['answer'])
+        print("\n" + "="*50)
 
-            # Medir tiempo total del proceso
-            start_time = time.time()
-            response = rag_chain.invoke(inputs)
-            end_time = time.time()
+        # Display detailed metrics
+        print("\n DETAILED METRICS:")
+        print(f"     Total time: {end_time - start_time:.2f} seconds")
 
-            print(f"\nResponse:")
-            print(response)
+        print("\n QUERY REWRITING:")
+        print(
+            f"   - Input Tokens: {result['metrics']['rewrite_input_tokens']}")
+        print(
+            f"   - Output Tokens: {result['metrics']['rewrite_output_tokens']}")
+        print(f"   - Cost: ${result['metrics']['rewrite_cost']:.6f}")
 
-            print(f"\nExecution time: {end_time - start_time:.2f}s")
-            tracker.show_summary()
+        print("\n FINAL ANSWER GENERATION:")
+        print(f"   - Input Tokens: {result['metrics']['answer_input_tokens']}")
+        print(
+            f"   - Output Tokens: {result['metrics']['answer_output_tokens']}")
+        print(f"   - Cost: ${result['metrics']['answer_cost']:.6f}")
 
-    finally:
-        print("\nSession ended.")
-        if tracker.total_cost > 0:
-            tracker.show_summary()
+        print("\n TOTALS:")
+        print(
+            f"   - Total Input Tokens: {result['metrics']['total_input_tokens']}")
+        print(
+            f"   - Total Output Tokens: {result['metrics']['total_output_tokens']}")
+        print(f"   - Total Cost (USD): ${result['metrics']['total_cost']:.6f}")
+
+    print("\nSystem finished.")
