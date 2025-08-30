@@ -1,11 +1,15 @@
 """
-Hybrid RAG simplificado usando EnsembleRetriever de LangChain.
+Simplified Hybrid RAG using LangChain's EnsembleRetriever.
+
+This script implements a Hybrid RAG pipeline combining lexical search (BM25)
+and semantic search (ChromaDB) using LangChain's EnsembleRetriever.
 """
 
 import os
 import json
 import time
 from pathlib import Path
+from typing import List, Dict, Any
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -15,26 +19,29 @@ from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import EnsembleRetriever
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 
-# Cargar variables de entorno
-load_dotenv(dotenv_path='../.env')
+# --- Environment and Path Configuration ---
+
+# Load environment variables from .env file
+ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
+
 
 if not os.getenv("OPENAI_API_KEY"):
-    raise ValueError("OPENAI_API_KEY no encontrada en el archivo .env")
+    raise ValueError("OPENAI_API_KEY not found in the .env file")
 
-# Definir rutas y configuraciones
+# Define paths
 script_dir = Path(__file__).resolve().parent
 chroma_db_dir = script_dir.parent / "Data" / "embeddings" / "chroma_db"
 collection_name = "guia_embarazo_parto"
 chunks_file = script_dir.parent / "Data" / "chunks" / "chunks_final.json"
 
-# Cargar documentos
+# --- Document Loading ---
 
 
-def load_documents():
-    """Carga los chunks desde el JSON y los convierte a Documentos de LangChain."""
+def load_documents() -> List[Document]:
+    """Loads chunks from the JSON file and converts them to LangChain Documents."""
     with open(chunks_file, 'r', encoding='utf-8') as f:
         chunks_data = json.load(f)
 
@@ -45,17 +52,17 @@ def load_documents():
 
 
 documents = load_documents()
-print(f"   Documentos cargados: {len(documents)}")
 
-# Configurar modelos y retrievers
+# --- Model and Retriever Configuration ---
+
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
 
-# 1. Retriever lexical (BM25)
+# 1. Lexical Retriever (BM25)
 bm25_retriever = BM25Retriever.from_documents(documents)
 bm25_retriever.k = 5
 
-# 2. Retriever semántico (Chroma)
+# 2. Semantic Retriever (Chroma)
 vectorstore = Chroma(
     persist_directory=str(chroma_db_dir),
     embedding_function=embeddings,
@@ -63,86 +70,172 @@ vectorstore = Chroma(
 )
 semantic_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
-# 3. Ensemble retriever
+# 3. Ensemble Retriever
+ensemble_weight_bm25 = 0.2
+ensemble_weight_semantic = 0.8
 ensemble_retriever = EnsembleRetriever(
     retrievers=[bm25_retriever, semantic_retriever],
-    weights=[0.2, 0.8]  # Ponderación equitativa
+    weights=[ensemble_weight_bm25, ensemble_weight_semantic]
 )
 
-# Función de búsqueda
 
+# --- Prompt Templates ---
 
-def search(query):
-    """Realiza una búsqueda híbrida usando el EnsembleRetriever."""
-    print(f"Consultando: '{query}'")
-    return ensemble_retriever.invoke(query)
+# Prompt for generating the final answer
+qa_template = """
+You are an expert in maternal health and pregnancy. Analyze the following medical context and answer the question accurately and in detail.
 
+INSTRUCTIONS:
+- Use ONLY the information provided in the context.
+- If the information is sufficient, provide a detailed answer.
+- If there is not enough information, state that clearly.
+- Remember that you are a medical specialist answering queries about pregnancy and childbirth.
 
-# Plantilla para el prompt
-template = """
-Eres un experto en salud materna y embarazo. Analiza el siguiente contexto médico y responde la pregunta de manera precisa y detallada.
-
-INSTRUCCIONES:
-- Usa ÚNICAMENTE la información proporcionada en el contexto.
-- Si la información es suficiente, proporciona una respuesta detallada.
-- Si no hay información suficiente, indícalo claramente.
-- Recuerda que eres un especialista médico respondiendo consultas sobre embarazo y parto.
-
-CONTEXTO MÉDICO:
+MEDICAL CONTEXT:
 {context}
 
-PREGUNTA: {question}
+QUESTION: {question}
 
-RESPUESTA MÉDICA DETALLADA:
+DETAILED MEDICAL ANSWER:
 """
-
-prompt = ChatPromptTemplate.from_template(template)
-
-# Formateo de documentos
+qa_prompt = ChatPromptTemplate.from_template(qa_template)
 
 
-def format_docs(docs):
-    """Formatea los documentos para ser incluidos en el prompt."""
+# --- Core Functions ---
+
+def format_docs(docs: List[Document]) -> str:
+    """
+    Formats the retrieved documents to be included in the final prompt.
+
+    Args:
+        docs (list): A list of retrieved LangChain Document objects.
+
+    Returns:
+        str: A formatted string containing the content of the documents.
+    """
     formatted_docs = []
     for i, doc in enumerate(docs):
         source = doc.metadata.get('source', 'N/A')
         page = doc.metadata.get('page_number', 'N/A')
 
-        formatted_doc = f"""--- Documento {i+1} ---
-Fuente: {source}, Página: {page}
-Contenido: {doc.page_content}"""
+        formatted_doc = f"""--- Document {i+1} ---
+Source: {source}, Page: {page}
+Content: {doc.page_content}"""
         formatted_docs.append(formatted_doc)
 
     return "\n\n".join(formatted_docs)
 
 
-# Definición de la cadena RAG
-rag_chain = (
-    {"context": RunnableLambda(search) | format_docs,
-     "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
-)
+def process_hybrid_query(query: str) -> Dict[str, Any]:
+    """
+    Processes a query using the hybrid RAG pipeline.
 
-# Ejecución principal
-if __name__ == "__main__":
-    print("Escribe tu pregunta o 'salir' para terminar.")
+    Args:
+        query (str): The user's question.
 
-    query = input("\nPregunta: ")
+    Returns:
+        Dict[str, Any]: A dictionary with the final answer, contexts, and detailed metrics.
+    """
+    # 1. Retrieve similar documents using the ensemble retriever
+    retrieved_docs = ensemble_retriever.invoke(query)
 
+    # 2. Format context
+    formatted_context = format_docs(retrieved_docs)
+
+    # 3. Generate final answer
+    with get_openai_callback() as cb_answer:
+        response = llm.invoke(qa_prompt.format_messages(
+            context=formatted_context,
+            question=query
+        ))
+
+    # 4. Return response and all metrics
+    return {
+        'answer': response.content,
+        'contexts': [doc.page_content for doc in retrieved_docs],
+        'retrieved_documents': retrieved_docs,
+        'metrics': {
+            'input_tokens': cb_answer.prompt_tokens,
+            'output_tokens': cb_answer.completion_tokens,
+            'cost': cb_answer.total_cost
+        }
+    }
+
+
+def query_for_evaluation(question: str) -> dict:
+    """
+    A wrapper function for RAG evaluation frameworks like Ragas.
+
+    This function processes a question and returns a dictionary structured for
+    easy integration with evaluation tools, preserving the original output format.
+
+    Args:
+        question (str): The question to process.
+
+    Returns:
+        dict: A dictionary containing the question, answer, contexts, source_documents, and metadata.
+    """
     start_time = time.time()
-    with get_openai_callback() as cb:
-        answer = rag_chain.invoke(query)
-
+    result = process_hybrid_query(question)
     end_time = time.time()
+    execution_time = end_time - start_time
 
-    print("\n" + "="*50)
-    print("RESPUESTA:")
-    print(answer)
-    print("\n" + "="*50)
-    print("\nEstadísticas de la consulta:")
-    print(f"   - Tiempo total: {end_time - start_time:.2f} segundos")
-    print(f"   - Tokens de entrada (prompt): {cb.prompt_tokens}")
-    print(f"   - Tokens de salida (respuesta): {cb.completion_tokens}")
-    print(f"   - Costo total (USD): ${cb.total_cost:.6f}")
+    input_tokens = result["metrics"]["input_tokens"]
+    output_tokens = result["metrics"]["output_tokens"]
+
+    return {
+        "question": question,
+        "answer": result["answer"],
+        "contexts": result["contexts"],
+        "source_documents": result["retrieved_documents"],
+        "metadata": {
+            "num_contexts": len(result["contexts"]),
+            "retrieval_method": "hybrid_bm25_semantic",
+            "ensemble_weights": [ensemble_weight_bm25, ensemble_weight_semantic],
+            "llm_model": "gpt-4o",
+            "embedding_model": "text-embedding-3-small",
+            "execution_time": execution_time,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_cost": result["metrics"]["cost"],
+            "tokens_used": input_tokens + output_tokens,
+        }
+    }
+
+
+# --- Main Execution Block ---
+
+if __name__ == "__main__":
+    print("\n=== Hybrid RAG (LangChain BM25 + Semantic) ===")
+    print("This system uses a hybrid search to retrieve relevant documents and generate an answer.")
+    print(f"Documents loaded: {len(documents)}")
+    try:
+        print(f"Vector store documents: {vectorstore._collection.count()}")
+    except Exception as e:
+        print(f"Could not retrieve vector store document count: {e}")
+    print("\nType your question or 'exit' to finish.")
+
+    while True:
+        query = input("\nQuestion: ")
+        if query.lower() == "exit":
+            break
+
+        start_time = time.time()
+        result = process_hybrid_query(query)
+        end_time = time.time()
+
+        print("\n" + "="*50)
+        print("ANSWER:")
+        print(result['answer'])
+        print("\n" + "="*50)
+
+        # Display detailed metrics
+        print("\n DETAILED METRICS:")
+        print(f"     Total time: {end_time - start_time:.2f} seconds")
+        print(
+            f"   - Input Tokens (prompt): {result['metrics']['input_tokens']}")
+        print(
+            f"   - Output Tokens (answer): {result['metrics']['output_tokens']}")
+        print(f"   - Total Cost (USD): ${result['metrics']['cost']:.6f}")
+
+    print("\nSystem finished.")
