@@ -107,33 +107,22 @@ llm_answer = ChatOpenAI(model_name="gpt-4o", temperature=0)
 # --- Final Answer Prompt ---
 
 qa_template = """
-You are a medical specialist expert in pregnancy and childbirth. Analyze ONLY the provided context and answer the question accurately and directly.
+You are a medical expert specializing in pregnancy and childbirth. 
+Your task is to analyze the provided medical context and answer the user's question accurately and concisely.
 
-STRICT RULES:
-1. Answer the question DIRECTLY using ONLY the information from the context.
-2. PRIORITIZE Documents 1 and 2 as they have the highest relevance to the question.
-3. DO NOT add external knowledge that is not in the context.
-4. If there are specific data (dosages, numbers, protocols), include them exactly as they appear.
+STRICT INSTRUCTIONS:
+1.  **Base your answer exclusively on the information within the MEDICAL CONTEXT section.** Do not use any external knowledge.
+2.  *The context is ordered by relevance.* Give the highest priority to the first few documents (e.g., Documents 1-2) as they are the most relevant. Use subsequent documents to supplement your answer if needed.
+3.  *Provide a direct and integrated answer.* Your response should be a single, well-written paragraph. Start with a direct answer to the question, then seamlessly incorporate specific details, data, and recommendations from the context to support it.
+4.  *If the context does not contain enough information to answer the question, state that clearly.* Do not try to invent an answer.
+5.  *Include a disclaimer.* At the end of your response, add the line: "This information is for educational purposes and does not replace professional medical consultation."
 
-PRIORITY ORDER:
-- Documents 1-2: HIGH relevance - use as the main source.
-- Documents 3-4: MEDIUM relevance - use as a supplement.
-- Documents 5+: LOW relevance - use only if necessary.
-
-RESPONSE FORMAT:
-1. Direct answer to the question (based mainly on Documents 1-2).
-2. Specific details from the context.
-3. Relevant related information (if applicable).
-4. Limitations of the available information (only if any).
-
-IMPORTANT: This information is for educational purposes and does not replace professional medical consultation.
-
-Context from medical guides (ordered by relevance):
+MEDICAL CONTEXT (ordered by relevance):
 {context}
 
-Question: {question}
+QUESTION: {question}
 
-Medical answer based on the context:
+DETAILED MEDICAL
 """
 qa_prompt = ChatPromptTemplate.from_template(qa_template)
 
@@ -153,24 +142,30 @@ def format_docs(docs: List[Document]) -> str:
     return "\n\n".join(formatted_docs)
 
 
-def process_rewriter_query(question: str, max_final_docs: int = 8) -> Dict[str, Any]:
+def process_rewriter_query(question: str, custom_rewriter_llm: ChatOpenAI = None, custom_answer_llm: ChatOpenAI = None, max_final_docs: int = 8) -> Dict[str, Any]:
     """
     Processes a query using the multi-query rewriting RAG pipeline.
 
     Args:
         question (str): The user's question.
+        custom_rewriter_llm (ChatOpenAI, optional): Custom model for query rewriting.
+        custom_answer_llm (ChatOpenAI, optional): Custom model for answer generation.
         max_final_docs (int): The maximum number of documents to return.
 
     Returns:
         Dict[str, Any]: A dictionary with the final answer, contexts, and detailed metrics.
     """
+    # Use custom models if provided, else use defaults
+    current_rewriter_llm = custom_rewriter_llm if custom_rewriter_llm else llm_rewriter
+    current_answer_llm = custom_answer_llm if custom_answer_llm else llm_answer
+    
     # 1. Generate rewritten queries and track metrics
     rewritten_queries = []
     rewrite_input_tokens, rewrite_output_tokens, rewrite_cost = 0, 0, 0
 
     for prompt in REPHRASE_PROMPTS:
         with get_openai_callback() as cb:
-            rewritten_query = (prompt | llm_rewriter | StrOutputParser()).invoke(
+            rewritten_query = (prompt | current_rewriter_llm | StrOutputParser()).invoke(
                 {"question": question}).strip()
             rewritten_queries.append(rewritten_query)
             rewrite_input_tokens += cb.prompt_tokens
@@ -200,7 +195,7 @@ def process_rewriter_query(question: str, max_final_docs: int = 8) -> Dict[str, 
     # 4. Format context and generate final answer
     formatted_context = format_docs(retrieved_docs)
     with get_openai_callback() as cb_answer:
-        answer = (qa_prompt | llm_answer | StrOutputParser()).invoke({
+        answer = (qa_prompt | current_answer_llm | StrOutputParser()).invoke({
             "context": formatted_context,
             "question": question
         })
@@ -229,15 +224,28 @@ def process_rewriter_query(question: str, max_final_docs: int = 8) -> Dict[str, 
     }
 
 
-def query_for_evaluation(question: str) -> dict:
+def query_for_evaluation(question: str, rewriter_model: str = None, answer_model: str = None) -> dict:
     """
     A wrapper function for RAG evaluation frameworks like Ragas.
 
     This function processes a question and returns a dictionary structured for
     easy integration with evaluation tools, preserving the original output format.
+
+    Args:
+        question (str): The question to process.
+        rewriter_model (str, optional): The name of the LLM model to use for query rewriting.
+        answer_model (str, optional): The name of the LLM model to use for answer generation.
     """
+    # Create custom LLMs if models are specified
+    custom_rewriter_llm = ChatOpenAI(model_name=rewriter_model, temperature=0.3) if rewriter_model else None
+    custom_answer_llm = ChatOpenAI(model_name=answer_model, temperature=0) if answer_model else None
+    
+    # Track which models are being used
+    used_rewriter_model = rewriter_model if rewriter_model else "gpt-3.5-turbo"
+    used_answer_model = answer_model if answer_model else "gpt-4o"
+    
     start_time = time.time()
-    result = process_rewriter_query(question)
+    result = process_rewriter_query(question, custom_rewriter_llm, custom_answer_llm)
     end_time = time.time()
     execution_time = end_time - start_time
 
@@ -253,8 +261,8 @@ def query_for_evaluation(question: str) -> dict:
             "num_contexts": len(result["contexts"]),
             "retrieval_method": "multi_query_rewrite",
             "rewrite_count": len(REPHRASE_PROMPTS),
-            "llm_model": "gpt-4o",
-            "rewriter_model": "gpt-3.5-turbo",
+            "llm_model": used_answer_model,
+            "rewriter_model": used_rewriter_model,
             "execution_time": execution_time,
             "input_tokens": total_input,
             "output_tokens": total_output,

@@ -45,14 +45,13 @@ ENV/
 .env.production
 
 # Data files
-Data/raw/*
+# Data/raw/*
 !Data/raw/.gitkeep
-Data/processed/*
+# Data/processed/*
 !Data/processed/.gitkeep
-Data/embeddings/*
+# Data/embeddings/*
 !Data/embeddings/.gitkeep
-Data/graphs/*
-!Data/graphs/.gitkeep
+
 
 # Results
 # results/*

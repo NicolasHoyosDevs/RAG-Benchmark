@@ -55,15 +55,17 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
 # Prompt for generating the final answer
 qa_template = """
-You are an expert in maternal health and pregnancy. Analyze the following medical context and answer the question accurately and in detail.
+You are a medical expert specializing in pregnancy and childbirth. 
+Your task is to analyze the provided medical context and answer the user's question accurately and concisely.
 
-INSTRUCTIONS:
-- Use ONLY the information provided in the context.
-- If the information is sufficient, provide a detailed answer.
-- If there is not enough information, state that clearly.
-- Remember that you are a medical specialist answering queries about pregnancy and childbirth.
+STRICT INSTRUCTIONS:
+1.  **Base your answer exclusively on the information within the MEDICAL CONTEXT section.** Do not use any external knowledge.
+2.  *The context is ordered by relevance.* Give the highest priority to the first few documents (e.g., Documents 1-2) as they are the most relevant. Use subsequent documents to supplement your answer if needed.
+3.  *Provide a direct and integrated answer.* Your response should be a single, well-written paragraph. Start with a direct answer to the question, then seamlessly incorporate specific details, data, and recommendations from the context to support it.
+4.  *If the context does not contain enough information to answer the question, state that clearly.* Do not try to invent an answer.
+5.  *Include a disclaimer.* At the end of your response, add the line: "This information is for educational purposes and does not replace professional medical consultation."
 
-MEDICAL CONTEXT:
+MEDICAL CONTEXT (ordered by relevance):
 {context}
 
 QUESTION: {question}
@@ -98,12 +100,13 @@ Content: {doc.page_content}"""
     return "\n\n".join(formatted_docs)
 
 
-def process_semantic_query(query: str) -> Dict[str, Any]:
+def process_semantic_query(query: str, custom_llm: ChatOpenAI = None) -> Dict[str, Any]:
     """
     Processes a query using the simple semantic RAG pipeline.
 
     Args:
         query (str): The user's question.
+        custom_llm (ChatOpenAI, optional): Custom LLM to use. If None, uses default llm.
 
     Returns:
         Dict[str, Any]: A dictionary with the final answer, contexts, and detailed metrics.
@@ -114,9 +117,11 @@ def process_semantic_query(query: str) -> Dict[str, Any]:
     # 2. Format context
     formatted_context = format_docs(retrieved_docs)
 
-    # 3. Generate final answer
+    # 3. Generate final answer using custom LLM if provided, otherwise use default
+    current_llm = custom_llm if custom_llm else llm
+    
     with get_openai_callback() as cb_answer:
-        response = llm.invoke(qa_prompt.format_messages(
+        response = current_llm.invoke(qa_prompt.format_messages(
             context=formatted_context,
             question=query
         ))
@@ -134,7 +139,7 @@ def process_semantic_query(query: str) -> Dict[str, Any]:
     }
 
 
-def query_for_evaluation(question: str) -> dict:
+def query_for_evaluation(question: str, llm_model: str = None) -> dict:
     """
     A wrapper function for RAG evaluation frameworks like Ragas.
 
@@ -144,12 +149,22 @@ def query_for_evaluation(question: str) -> dict:
 
     Args:
         question (str): The question to process.
+        llm_model (str, optional): Model to use. If None, uses default "gpt-4o".
 
     Returns:
         dict: A dictionary containing the question, answer, contexts, and metadata.
     """
     start_time = time.time()
-    result = process_semantic_query(question)
+    
+    # Create custom LLM if model is specified, otherwise use default behavior
+    if llm_model:
+        custom_llm = ChatOpenAI(model_name=llm_model, temperature=0)
+        result = process_semantic_query(question, custom_llm)
+        used_model = llm_model
+    else:
+        result = process_semantic_query(question)
+        used_model = "gpt-4o"  # Default model
+    
     end_time = time.time()
     execution_time = end_time - start_time
 
@@ -164,7 +179,7 @@ def query_for_evaluation(question: str) -> dict:
         "metadata": {
             "num_contexts": len(result["contexts"]),
             "retrieval_method": "semantic_only",
-            "llm_model": "gpt-4o",
+            "llm_model": used_model,
             "embedding_model": "text-embedding-3-small",
             "execution_time": execution_time,
             "input_tokens": input_tokens,

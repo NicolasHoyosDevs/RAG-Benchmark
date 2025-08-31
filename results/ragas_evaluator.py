@@ -95,27 +95,42 @@ class RAGASEvaluator:
         self.results_dir = Path(__file__).parent
         self.debug = debug
         
-        # Configure evaluation function based on RAG type
+        # Configure evaluation function and default model based on RAG type
         if rag_type.lower() == "hybrid":
             self.query_function = hybrid_query_for_evaluation
             self.rag_name = "Hybrid RAG (BM25 + Semantic)"
             self.rag_type = "hybrid"
+            self.llm_model = "gpt-4o"  # Default model for hybrid RAG
         elif rag_type.lower() == "rewriter":
             self.query_function = rewriter_query_for_evaluation
             self.rag_name = "Rewriter RAG (Multi-Query)"
             self.rag_type = "rewriter"
+            self.llm_model = "gpt-4o"  # Default model for rewriter RAG
         elif rag_type.lower() == "hyde":
             self.query_function = hyde_query_for_evaluation
             self.rag_name = "HyDE RAG (Hypothetical Documents)"
             self.rag_type = "hyde"
+            self.llm_model = "gpt-4o"  # Default model for hyde RAG
         elif rag_type.lower() == "simple":
             self.query_function = simple_query_for_evaluation
             self.rag_name = "Simple Semantic RAG"
             self.rag_type = "simple"
+            self.llm_model = "gpt-4o"  # Default model for simple RAG
         else:
             raise ValueError(f"Unsupported RAG type: {rag_type}. Use 'rewriter', 'hybrid', 'hyde', or 'simple'")
         
         print(f"RAGAS Evaluator configured for: {self.rag_name}")
+        
+    def set_models(self, llm_model: str = None, embeddings_model: str = None):
+        """
+        Update the LLM model used by this evaluator
+        
+        Args:
+            llm_model (str): New LLM model name
+            embeddings_model (str): New embeddings model name (not used in current implementation)
+        """
+        if llm_model:
+            self.llm_model = llm_model
         
     def load_test_queries(self, use_obstetric_dataset: bool = True) -> List[Dict]:
         """
@@ -275,24 +290,31 @@ class RAGASEvaluator:
             else:
                 print("Performance: Significant improvements needed")
     
-    def save_results(self, results, filename: str = None):
-        """Save evaluation results to JSON file with detailed per-question results"""
+    def save_results(self, results, filename: str = None, return_data_only: bool = False, model_name: str = None):
+        """
+        Save evaluation results to JSON file or return as a dictionary.
+        
+        Args:
+            results: The evaluation results from RAGAS.
+            filename (str, optional): The name of the file to save. Defaults to None.
+            return_data_only (bool, optional): If True, returns the data dictionary.
+            model_name (str, optional): The name of the LLM model used.
+        """
+        import pandas as pd
         if not results:
             print("No results to save")
-            return
+            return None if return_data_only else None
         
-        if filename is None:
+        if filename is None and not return_data_only:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"ragas_evaluation_{self.rag_type}_{timestamp}.json"
         
-        filepath = self.results_dir / filename
+        filepath = self.results_dir / filename if filename else None
         
-        # Extract aggregated metrics from results object
         aggregated_results = {}
         detailed_results = []
         
         try:
-            # Get aggregated metrics
             for metric in self.metrics:
                 metric_name = metric.name
                 if hasattr(results, metric_name):
@@ -300,59 +322,27 @@ class RAGASEvaluator:
                 elif hasattr(results, 'to_pandas'):
                     df = results.to_pandas()
                     if metric_name in df.columns:
-                        aggregated_results[metric_name] = float(df[metric_name].mean())
-            
-            # Get detailed per-question results
+                        mean_value = df[metric_name].mean()
+                        aggregated_results[metric_name] = float(mean_value) if pd.notna(mean_value) else 0.0
+
             if hasattr(results, 'to_pandas'):
                 df = results.to_pandas()
                 
-                # Debug: Print column names and data to understand structure (only if debug enabled)
-                if self.debug:
-                    print(f"DEBUG - DataFrame columns: {df.columns.tolist()}")
-                    print(f"DEBUG - DataFrame shape: {df.shape}")
-                    if len(df) > 0:
-                        first_row = df.iloc[0]
-                        print(f"DEBUG - First row sample: question={str(first_row.get('question', ''))[:50]}...")
-                    
-                    # Debug original dataset if available
-                    if hasattr(self, 'original_dataset') and self.original_dataset is not None:
-                        original_df = self.original_dataset.to_pandas()
-                        print(f"DEBUG - Original dataset columns: {original_df.columns.tolist()}")
-                
                 for i, row in df.iterrows():
-                    # Get data from original dataset if available, otherwise from results
                     if hasattr(self, 'original_dataset') and self.original_dataset is not None and i < len(self.original_dataset):
                         orig_df = self.original_dataset.to_pandas()
                         orig_row = orig_df.iloc[i]
-                        question_text = str(orig_row['question']) if 'question' in orig_df.columns else ''
-                        ground_truth_text = str(orig_row['ground_truth']) if 'ground_truth' in orig_df.columns else ''
-                        answer_text = str(orig_row['answer']) if 'answer' in orig_df.columns else ''
-                        contexts_data = orig_row['contexts'] if 'contexts' in orig_df.columns else []
+                        question_text = str(orig_row.get('question', ''))
+                        ground_truth_text = str(orig_row.get('ground_truth', ''))
+                        answer_text = str(orig_row.get('answer', ''))
+                        contexts_data = orig_row.get('contexts', [])
                     else:
-                        # Fallback to results dataframe
-                        question_text = str(row['question']) if 'question' in df.columns else ''
-                        ground_truth_text = str(row['ground_truth']) if 'ground_truth' in df.columns else ''
-                        answer_text = str(row['answer']) if 'answer' in df.columns else ''
-                        contexts_data = row['contexts'] if 'contexts' in df.columns else []
-                    
-                    # Debug contexts data for first few entries (only if debug enabled)
-                    if self.debug and i < 2:
-                        print(f"DEBUG - Question {i+1} contexts:")
-                        print(f"  Type: {type(contexts_data)}")
-                        if isinstance(contexts_data, list):
-                            print(f"  Length: {len(contexts_data)}")
-                        elif hasattr(contexts_data, '__len__'):
-                            print(f"  Length: {len(contexts_data)}")
-                    
-                    # Improved contexts count calculation
-                    if isinstance(contexts_data, list):
-                        contexts_count = len(contexts_data)
-                    elif hasattr(contexts_data, '__len__'):
-                        contexts_count = len(contexts_data)
-                    elif contexts_data is not None:
-                        contexts_count = 1
-                    else:
-                        contexts_count = 0
+                        question_text = str(row.get('question', ''))
+                        ground_truth_text = str(row.get('ground_truth', ''))
+                        answer_text = str(row.get('answer', ''))
+                        contexts_data = row.get('contexts', [])
+
+                    contexts_count = len(contexts_data) if isinstance(contexts_data, list) else (1 if contexts_data is not None else 0)
                     
                     question_result = {
                         "question_id": i + 1,
@@ -361,30 +351,15 @@ class RAGASEvaluator:
                         "answer": answer_text,
                         "contexts_count": contexts_count,
                         "metrics": {
-                            "faithfulness": float(row['faithfulness']) if 'faithfulness' in df.columns else 0.0,
-                            "answer_relevancy": float(row['answer_relevancy']) if 'answer_relevancy' in df.columns else 0.0,
-                            "context_precision": float(row['context_precision']) if 'context_precision' in df.columns else 0.0,
-                            "context_recall": float(row['context_recall']) if 'context_recall' in df.columns else 0.0
+                            "faithfulness": float(row['faithfulness']) if 'faithfulness' in row and pd.notna(row['faithfulness']) else 0.0,
+                            "answer_relevancy": float(row['answer_relevancy']) if 'answer_relevancy' in row and pd.notna(row['answer_relevancy']) else 0.0,
+                            "context_precision": float(row['context_precision']) if 'context_precision' in row and pd.notna(row['context_precision']) else 0.0,
+                            "context_recall": float(row['context_recall']) if 'context_recall' in row and pd.notna(row['context_recall']) else 0.0
                         }
                     }
                     
-                    # Add performance metadata if available
                     if hasattr(self, 'performance_metadata') and i < len(self.performance_metadata):
-                        perf_data = self.performance_metadata[i]
-                        question_result["performance"] = {
-                            "execution_time": perf_data.get('execution_time', 0.0),
-                            "input_tokens": perf_data.get('input_tokens', 0),
-                            "output_tokens": perf_data.get('output_tokens', 0),
-                            "total_cost": perf_data.get('total_cost', 0.0)
-                        }
-                    else:
-                        # Add empty performance data
-                        question_result["performance"] = {
-                            "execution_time": 0.0,
-                            "input_tokens": 0,
-                            "output_tokens": 0,
-                            "total_cost": 0.0
-                        }
+                        question_result["performance"] = self.performance_metadata[i]
                     
                     detailed_results.append(question_result)
                     
@@ -394,12 +369,10 @@ class RAGASEvaluator:
                 import traceback
                 traceback.print_exc()
             aggregated_results = {"error": str(e)}
-        
-        # Calculate additional aggregated statistics
+
         overall_stats = {}
         if detailed_results:
-            # Average performance metrics
-            avg_execution_time = sum(q.get('performance', {}).get('execution_time', 0) for q in detailed_results) / len(detailed_results)
+            avg_execution_time = sum(q.get('performance', {}).get('execution_time', 0) for q in detailed_results) / len(detailed_results) if detailed_results else 0
             total_input_tokens = sum(q.get('performance', {}).get('input_tokens', 0) for q in detailed_results)
             total_output_tokens = sum(q.get('performance', {}).get('output_tokens', 0) for q in detailed_results)
             total_cost = sum(q.get('performance', {}).get('total_cost', 0) for q in detailed_results)
@@ -410,25 +383,44 @@ class RAGASEvaluator:
                 "total_output_tokens": total_output_tokens,
                 "total_cost": round(total_cost, 6),
                 "average_cost_per_question": round(total_cost / len(detailed_results), 6) if detailed_results else 0,
-                "overall_average_score": round(sum(aggregated_results.values()) / len(aggregated_results), 3) if aggregated_results and len(aggregated_results) > 0 else 0
+                "overall_average_score": round(sum(aggregated_results.values()) / len(aggregated_results), 3) if aggregated_results else 0
             }
-        
-        # Prepare comprehensive data for saving
+
         save_data = {
             "metadata": {
                 "timestamp": datetime.now().isoformat(),
-                "rag_system": {
-                    "name": self.rag_name,
-                    "type": self.rag_type
-                },
+                "evaluation_type": f"single_rag_evaluation_{self.rag_type}",
                 "dataset_size": len(detailed_results),
-                "metrics_used": [m.name for m in self.metrics]
+                "rags_evaluated": [self.rag_type],
+                "model_used": model_name
             },
-            "aggregated_results": aggregated_results,
-            "overall_statistics": overall_stats,
-            "detailed_results": detailed_results
+            "summary": {
+                self.rag_type: {
+                    "rag_name": self.rag_name,
+                    "metrics": aggregated_results,
+                    "performance": overall_stats
+                }
+            },
+            "question_by_question": [
+                {
+                    "question_id": q["question_id"],
+                    "question": q["question"],
+                    "ground_truth": q["ground_truth"],
+                    "rag_results": {
+                        self.rag_type: {
+                            "answer": q["answer"],
+                            "contexts_count": q["contexts_count"],
+                            "metrics": q["metrics"],
+                            "performance": q.get("performance", {})
+                        }
+                    }
+                } for q in detailed_results
+            ]
         }
         
+        if return_data_only:
+            return save_data
+
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=2, ensure_ascii=False)
@@ -469,10 +461,148 @@ class RAGASEvaluator:
         self.display_results(results)
         
         # 5. Save results
-        self.save_results(results)
+        self.save_results(results, model_name=self.llm_model)
         
         print(f"\nEvaluation completed - {len(dataset)} queries processed")
         return results
+
+    def run_multi_model_evaluation(self, models_to_test: list = None):
+        """
+        Run evaluation for the current RAG type against multiple LLM models and
+        save a consolidated JSON report.
+        """
+        if models_to_test is None:
+            models_to_test = ["gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini", "gpt-4"]
+
+        print(f"Starting multi-model evaluation for RAG type: '{self.rag_type}'")
+        print(f"Models to be tested: {models_to_test}")
+
+        all_models_data = {}
+        
+        original_query_function = self.query_function
+
+        for model_name in models_to_test:
+            print(f"\n--- Evaluating with model: {model_name} ---")
+            try:
+                # Set the model for this run
+                self.set_models(llm_model=model_name)
+                
+                # Create a wrapper function that passes the model parameter
+                def query_with_model(question):
+                    if self.rag_type == "simple":
+                        return simple_query_for_evaluation(question, llm_model=model_name)
+                    elif self.rag_type == "hybrid":
+                        return hybrid_query_for_evaluation(question, llm_model=model_name)
+                    elif self.rag_type == "hyde":
+                        return hyde_query_for_evaluation(question, hyde_model=model_name, answer_model=model_name)
+                    elif self.rag_type == "rewriter":
+                        return rewriter_query_for_evaluation(question, rewriter_model=model_name, answer_model=model_name)
+                    else:
+                        return self.query_function(question)
+                
+                # Temporarily replace the query function
+                original_query_function = self.query_function
+                self.query_function = query_with_model
+                
+                # Run the standard evaluation process
+                results_dataset = self.run_evaluation()
+                
+                # Restore original function
+                self.query_function = original_query_function
+                
+                if results_dataset:
+                    # Get the results as a dictionary, don't save to file yet
+                    model_data = self.save_results(results_dataset, return_data_only=True, model_name=model_name)
+                    if model_data:
+                        all_models_data[model_name] = model_data
+                        print(f"Successfully collected results for model: {model_name}")
+                else:
+                    print(f"Skipping model {model_name} due to evaluation failure.")
+
+            except Exception as e:
+                print(f"An error occurred during evaluation for model '{model_name}': {e}")
+                if self.debug:
+                    import traceback
+                    traceback.print_exc()
+        
+        self.query_function = original_query_function
+
+        if not all_models_data:
+            print("Multi-model evaluation finished with no data collected.")
+            return
+
+        final_report = self._create_multi_model_report(all_models_data, models_to_test)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"ragas_multimodel_{self.rag_type}_{timestamp}.json"
+        filepath = self.results_dir / filename
+        
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(final_report, f, indent=2, ensure_ascii=False)
+            print(f"\nConsolidated multi-model report saved to: {filepath}")
+        except Exception as e:
+            print(f"Error saving consolidated report: {e}")
+
+    def _create_multi_model_report(self, all_models_data: dict, models_evaluated: list):
+        """
+        Private helper to structure the final multi-model report.
+        """
+        if not all_models_data:
+            return {}
+
+        first_model_key = next(iter(all_models_data))
+        first_model_report = all_models_data[first_model_key]
+        num_questions = first_model_report["metadata"]["dataset_size"]
+
+        summary = {}
+        for model_name, data in all_models_data.items():
+            summary[model_name] = {
+                "model_name": model_name,
+                "metrics": data.get("summary", {}).get(self.rag_type, {}).get("metrics", {}),
+                "performance": data.get("summary", {}).get(self.rag_type, {}).get("performance", {})
+            }
+
+        question_by_question = []
+        for i in range(num_questions):
+            question_text = ""
+            ground_truth_text = ""
+            for model_name in models_evaluated:
+                if model_name in all_models_data and i < len(all_models_data[model_name]["question_by_question"]):
+                    question_text = all_models_data[model_name]["question_by_question"][i]["question"]
+                    ground_truth_text = all_models_data[model_name]["question_by_question"][i]["ground_truth"]
+                    break
+
+            question_data = {
+                "question_id": i + 1,
+                "question": question_text,
+                "ground_truth": ground_truth_text,
+                "rag_results": {}
+            }
+            
+            for model_name, data in all_models_data.items():
+                if i < len(data["question_by_question"]):
+                    q_result = data["question_by_question"][i]["rag_results"][self.rag_type]
+                    question_data["rag_results"][model_name] = {
+                        "answer": q_result.get("answer"),
+                        "contexts_count": q_result.get("contexts_count"),
+                        "metrics": q_result.get("metrics"),
+                        "performance": q_result.get("performance")
+                    }
+            question_by_question.append(question_data)
+
+        final_report = {
+            "metadata": {
+                "timestamp": datetime.now().isoformat(),
+                "evaluation_type": "multi_model_rag_comparison",
+                "rag_type_evaluated": self.rag_type,
+                "dataset_size": num_questions,
+                "models_evaluated": models_evaluated
+            },
+            "summary": summary,
+            "question_by_question": question_by_question
+        }
+        return final_report
 
 
 def evaluate_rewriter_rag(export_analysis: bool = False, debug: bool = False):
@@ -848,8 +978,14 @@ def main():
             return evaluate_both_rags(export_analysis=export_analysis, debug=debug)
         elif rag_type == "all":
             return evaluate_all_rags(export_analysis=export_analysis, debug=debug)
+        elif rag_type == "multi-model":
+            rag_to_test = args[1] if len(args) > 1 else "simple"
+            evaluator = RAGASEvaluator(rag_type=rag_to_test, debug=debug)
+            return evaluator.run_multi_model_evaluation()
+        elif rag_type == "all-models-all-rags":
+            return run_all_models_all_rags_evaluation(export_analysis=export_analysis, debug=debug)
         else:
-            print("Invalid RAG type. Use: 'rewriter', 'hybrid', 'hyde', 'simple', 'both', or 'all'")
+            print("Invalid RAG type. Use: 'rewriter', 'hybrid', 'hyde', 'simple', 'both', 'all', or 'multi-model [rag_type]'")
             return
     
     # Default: show usage
@@ -861,12 +997,198 @@ def main():
     print("  - simple: Simple Semantic RAG")
     print("  - both: Evaluate original two RAGs (rewriter + hybrid)")
     print("  - all: Evaluate all 4 RAG systems")
+    print("  - multi-model [rag_type]: Evaluate a specific RAG with multiple models")
+    print("  - all-models-all-rags: Evaluate ALL RAGs with ALL models (comprehensive)")
     print("\nUsage: python ragas_evaluator.py [type] [--export] [--debug]")
     print("Examples:")
     print("  python ragas_evaluator.py simple")
     print("  python ragas_evaluator.py all --export")
-    print("  python ragas_evaluator.py hyde --debug")
+    print("  python ragas_evaluator.py multi-model simple")
+    print("  python ragas_evaluator.py all-models-all-rags")
     return evaluate_rewriter_rag(export_analysis=export_analysis, debug=debug)
+
+
+def run_all_models_all_rags_evaluation(export_analysis: bool = False, debug: bool = False):
+    """
+    Evaluate ALL RAG types against ALL LLM models and save a consolidated JSON report.
+    """
+    rag_types = ["simple", "hybrid", "hyde", "rewriter"]
+    models_to_test = ["gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini", "gpt-4"]
+
+    print("🚀 Starting comprehensive evaluation: ALL RAGs vs ALL Models")
+    print(f"RAG types to evaluate: {rag_types}")
+    print(f"Models to test: {models_to_test}")
+    print(f"Total evaluations: {len(rag_types)} × {len(models_to_test)} = {len(rag_types) * len(models_to_test)}")
+    print("="*80)
+
+    all_results = {}
+
+    for rag_type in rag_types:
+        print(f"\n{'='*60}")
+        print(f"📊 Evaluating RAG: {rag_type.upper()}")
+        print(f"{'='*60}")
+
+        evaluator = RAGASEvaluator(rag_type=rag_type, debug=debug)
+        original_query_function = evaluator.query_function
+
+        rag_results = {}
+
+        for model_name in models_to_test:
+            print(f"\n🤖 {rag_type.upper()} + {model_name}")
+
+            try:
+                # Create wrapper function for this model
+                def query_with_model(question):
+                    if rag_type == "simple":
+                        return simple_query_for_evaluation(question, llm_model=model_name)
+                    elif rag_type == "hybrid":
+                        return hybrid_query_for_evaluation(question, llm_model=model_name)
+                    elif rag_type == "hyde":
+                        return hyde_query_for_evaluation(question, hyde_model=model_name, answer_model=model_name)
+                    elif rag_type == "rewriter":
+                        return rewriter_query_for_evaluation(question, rewriter_model=model_name, answer_model=model_name)
+                    else:
+                        return original_query_function(question)
+
+                evaluator.query_function = query_with_model
+                evaluator.set_models(llm_model=model_name)
+
+                # Run evaluation
+                results_dataset = evaluator.run_evaluation()
+
+                if results_dataset:
+                    model_data = evaluator.save_results(results_dataset, return_data_only=True, model_name=model_name)
+                    if model_data:
+                        rag_results[model_name] = model_data
+                        print(f"✅ Completed: {rag_type} + {model_name}")
+                    else:
+                        print(f"❌ Failed to save results: {rag_type} + {model_name}")
+                else:
+                    print(f"❌ Evaluation failed: {rag_type} + {model_name}")
+
+            except Exception as e:
+                print(f"❌ Error with {rag_type} + {model_name}: {e}")
+                if debug:
+                    import traceback
+                    traceback.print_exc()
+
+        evaluator.query_function = original_query_function
+
+        if rag_results:
+            all_results[rag_type] = rag_results
+            print(f"✅ {rag_type.upper()}: {len(rag_results)}/{len(models_to_test)} models completed")
+        else:
+            print(f"❌ {rag_type.upper()}: No models completed successfully")
+
+    # Create final consolidated report
+    if all_results:
+        final_report = create_comprehensive_report(all_results, rag_types, models_to_test)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"ragas_comprehensive_all_rags_all_models_{timestamp}.json"
+        filepath = Path(__file__).parent / filename
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(final_report, f, indent=2, ensure_ascii=False)
+            print(f"\n{'='*80}")
+            print("🎉 COMPREHENSIVE EVALUATION COMPLETED!")
+            print(f"📄 Report saved to: {filepath}")
+            print(f"📊 Total evaluations: {len(rag_types)} RAGs × {len(models_to_test)} models = {len(rag_types) * len(models_to_test)}")
+            successful_evals = sum(len(models) for models in all_results.values())
+            print(f"✅ Successful evaluations: {successful_evals}/{len(rag_types) * len(models_to_test)}")
+            print(f"{'='*80}")
+        except Exception as e:
+            print(f"❌ Error saving comprehensive report: {e}")
+    else:
+        print("❌ No evaluations completed successfully")
+
+    return all_results
+
+
+def create_comprehensive_report(all_results: dict, rag_types: list, models_evaluated: list):
+    """
+    Create the final comprehensive report structure.
+    """
+    if not all_results:
+        return {}
+
+    # Get dataset info from first available result
+    first_rag = next(iter(all_results))
+    first_model = next(iter(all_results[first_rag]))
+    first_report = all_results[first_rag][first_model]
+    num_questions = first_report["metadata"]["dataset_size"]
+
+    # Build summary section
+    summary = {}
+    for rag_type in rag_types:
+        if rag_type in all_results:
+            summary[rag_type] = {}
+            for model_name, data in all_results[rag_type].items():
+                summary[rag_type][model_name] = {
+                    "model_name": model_name,
+                    "rag_name": data.get("summary", {}).get(rag_type, {}).get("rag_name", f"{rag_type} RAG"),
+                    "metrics": data.get("summary", {}).get(rag_type, {}).get("metrics", {}),
+                    "performance": data.get("summary", {}).get(rag_type, {}).get("performance", {})
+                }
+
+    # Build question_by_question section
+    question_by_question = []
+    for i in range(num_questions):
+        # Get question data from first available result
+        question_text = ""
+        ground_truth_text = ""
+        for rag_type in rag_types:
+            if rag_type in all_results:
+                for model_name in models_evaluated:
+                    if (model_name in all_results[rag_type] and
+                        i < len(all_results[rag_type][model_name]["question_by_question"])):
+                        q_data = all_results[rag_type][model_name]["question_by_question"][i]
+                        question_text = q_data["question"]
+                        ground_truth_text = q_data["ground_truth"]
+                        break
+                if question_text:
+                    break
+
+        question_data = {
+            "question_id": i + 1,
+            "question": question_text,
+            "ground_truth": ground_truth_text,
+            "rag_results": {}
+        }
+
+        # Add results for each RAG and model combination
+        for rag_type in rag_types:
+            if rag_type in all_results:
+                question_data["rag_results"][rag_type] = {}
+                for model_name in models_evaluated:
+                    if (model_name in all_results[rag_type] and
+                        i < len(all_results[rag_type][model_name]["question_by_question"])):
+                        q_result = all_results[rag_type][model_name]["question_by_question"][i]["rag_results"][rag_type]
+                        question_data["rag_results"][rag_type][model_name] = {
+                            "answer": q_result.get("answer"),
+                            "contexts_count": q_result.get("contexts_count"),
+                            "metrics": q_result.get("metrics"),
+                            "performance": q_result.get("performance")
+                        }
+
+        question_by_question.append(question_data)
+
+    # Final report structure
+    final_report = {
+        "metadata": {
+            "timestamp": datetime.now().isoformat(),
+            "evaluation_type": "comprehensive_all_rags_all_models",
+            "dataset_size": num_questions,
+            "rags_evaluated": rag_types,
+            "models_evaluated": models_evaluated,
+            "total_evaluations": len(rag_types) * len(models_evaluated)
+        },
+        "summary": summary,
+        "question_by_question": question_by_question
+    }
+
+    return final_report
 
 
 if __name__ == "__main__":

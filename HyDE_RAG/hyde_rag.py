@@ -79,20 +79,22 @@ hyde_prompt = ChatPromptTemplate.from_template(hyde_prompt_template)
 
 # Prompt for generating the final answer
 qa_template = """
-You are an expert in maternal health and pregnancy. Analyze the following medical context and answer the question accurately and in detail.
+You are a medical expert specializing in pregnancy and childbirth. 
+Your task is to analyze the provided medical context and answer the user's question accurately and concisely.
 
-INSTRUCTIONS:
-- Use ONLY the information provided in the context.
-- If the information is sufficient, provide a detailed answer.
-- If there is not enough information, state that clearly.
-- Remember that you are a medical specialist answering queries about pregnancy and childbirth.
+STRICT INSTRUCTIONS:
+1.  **Base your answer exclusively on the information within the MEDICAL CONTEXT section.** Do not use any external knowledge.
+2.  *The context is ordered by relevance.* Give the highest priority to the first few documents (e.g., Documents 1-2) as they are the most relevant. Use subsequent documents to supplement your answer if needed.
+3.  *Provide a direct and integrated answer.* Your response should be a single, well-written paragraph. Start with a direct answer to the question, then seamlessly incorporate specific details, data, and recommendations from the context to support it.
+4.  *If the context does not contain enough information to answer the question, state that clearly.* Do not try to invent an answer.
+5.  *Include a disclaimer.* At the end of your response, add the line: "This information is for educational purposes and does not replace professional medical consultation."
 
-MEDICAL CONTEXT:
+MEDICAL CONTEXT (ordered by relevance):
 {context}
 
 QUESTION: {question}
 
-DETAILED MEDICAL ANSWER:
+DETAILED MEDICAL
 """
 qa_prompt = ChatPromptTemplate.from_template(qa_template)
 
@@ -146,19 +148,33 @@ Content: {doc.page_content}"""
     return "\n\n".join(formatted_docs)
 
 
-def process_hyde_query(query: str) -> Dict[str, Any]:
+def process_hyde_query(query: str, custom_hyde_llm: ChatOpenAI = None, custom_answer_llm: ChatOpenAI = None) -> Dict[str, Any]:
     """
     Processes a query using the full HyDE RAG pipeline.
 
     Args:
         query (str): The user's question.
+        custom_hyde_llm (ChatOpenAI, optional): Custom model for hypothetical document generation.
+        custom_answer_llm (ChatOpenAI, optional): Custom model for answer generation.
 
     Returns:
         Dict[str, Any]: A dictionary with the final answer, contexts, and detailed metrics.
     """
-    # 1. Generate hypothetical document
-    hyde_result = generate_hypothetical_document(query)
-    hypothetical_doc = hyde_result['document']
+    # Use custom models if provided, else use defaults
+    current_hyde_llm = custom_hyde_llm if custom_hyde_llm else llm_hyde
+    current_answer_llm = custom_answer_llm if custom_answer_llm else llm_answer
+
+    # 1. Generate hypothetical document using the appropriate model
+    with get_openai_callback() as cb:
+        response = (hyde_prompt | current_hyde_llm | StrOutputParser()
+                    ).invoke({"question": query})
+    hypothetical_doc = response.strip()
+    hyde_result = {
+        'document': hypothetical_doc,
+        'input_tokens': cb.prompt_tokens,
+        'output_tokens': cb.completion_tokens,
+        'cost': cb.total_cost
+    }
 
     # 2. Retrieve similar documents
     retrieved_docs = retriever.invoke(hypothetical_doc)
@@ -166,9 +182,9 @@ def process_hyde_query(query: str) -> Dict[str, Any]:
     # 3. Format context
     formatted_context = format_docs(retrieved_docs)
 
-    # 4. Generate final answer
+    # 4. Generate final answer using the appropriate model
     with get_openai_callback() as cb_answer:
-        response = llm_answer.invoke(qa_prompt.format_messages(
+        response = current_answer_llm.invoke(qa_prompt.format_messages(
             context=formatted_context,
             question=query
         ))
@@ -190,7 +206,7 @@ def process_hyde_query(query: str) -> Dict[str, Any]:
     }
 
 
-def query_for_evaluation(question: str) -> dict:
+def query_for_evaluation(question: str, hyde_model: str = None, answer_model: str = None) -> dict:
     """
     A wrapper function for RAG evaluation frameworks like Ragas.
 
@@ -199,12 +215,22 @@ def query_for_evaluation(question: str) -> dict:
 
     Args:
         question (str): The question to process.
+        hyde_model (str, optional): The name of the LLM model to use for HyDE generation.
+        answer_model (str, optional): The name of the LLM model to use for answer generation.
 
     Returns:
         dict: A dictionary containing the question, answer, contexts, and metadata.
     """
+    # Create custom LLMs if models are specified
+    custom_hyde_llm = ChatOpenAI(model_name=hyde_model, temperature=0.7) if hyde_model else None
+    custom_answer_llm = ChatOpenAI(model_name=answer_model, temperature=0) if answer_model else None
+    
+    # Track which models are being used
+    used_hyde_model = hyde_model if hyde_model else "gpt-3.5-turbo"
+    used_answer_model = answer_model if answer_model else "gpt-4o"
+    
     start_time = time.time()
-    result = process_hyde_query(question)
+    result = process_hyde_query(question, custom_hyde_llm, custom_answer_llm)
     end_time = time.time()
     execution_time = end_time - start_time
 
@@ -218,8 +244,8 @@ def query_for_evaluation(question: str) -> dict:
             "output_tokens": result["total_output_tokens"],
             "total_cost": result["total_cost"],
             "retrieval_method": "hyde",
-            "llm_hyde_model": "gpt-3.5-turbo",
-            "llm_answer_model": "gpt-4o",
+            "llm_hyde_model": used_hyde_model,
+            "llm_answer_model": used_answer_model,
             "hyde_cost": result["hyde_metrics"]["cost"],
             "answer_cost": result["answer_metrics"]["cost"]
         }

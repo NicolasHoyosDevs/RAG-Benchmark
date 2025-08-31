@@ -1,0 +1,272 @@
+{
+  "metadata": {
+    "timestamp": "2025-08-30T17:56:48.981921",
+    "evaluation_type": "single_rag_evaluation_hyde",
+    "dataset_size": 10,
+    "rags_evaluated": [
+      "hyde"
+    ],
+    "model_used": "gpt-4o"
+  },
+  "summary": {
+    "hyde": {
+      "rag_name": "HyDE RAG (Hypothetical Documents)",
+      "metrics": {
+        "faithfulness": 0.8397186147186148,
+        "answer_relevancy": 0.6248950811171092,
+        "context_precision": 0.7495833333113437,
+        "context_recall": 0.6
+      },
+      "performance": {
+        "average_execution_time": 14.86,
+        "total_input_tokens": 8959,
+        "total_output_tokens": 11307,
+        "total_cost": 0.135468,
+        "average_cost_per_question": 0.013547,
+        "overall_average_score": 0.704
+      }
+    }
+  },
+  "question_by_question": [
+    {
+      "question_id": 1,
+      "question": "¿En qué momento y quien debe reevaluar el riesgo clínico de una paciente con embarazo de curso normal?",
+      "ground_truth": "El Ginecobstetra en la semana 28 - 30 y semana 34 – 36.",
+      "rag_results": {
+        "hyde": {
+          "answer": "The provided medical context does not explicitly state when and by whom the clinical risk of a patient with a normal course pregnancy should be reevaluated. However, it does provide some relevant information regarding prenatal care and risk assessment:\n\n1. **Initial Risk Assessment**: Document 1 mentions that the evaluation of psychosocial and biological risk is part of the initial prenatal care consultation. This assessment helps determine the professional responsible for the first prenatal check-up and the need for additional care by a team.\n\n2. **Continuity of Care**: Document 4 emphasizes the importance of continuity in prenatal care, ideally conducted by the same group of professionals, which suggests that ongoing risk assessment might be part of this continuous care model.\n\n3. **Professional Involvement**: Document 4 also recommends that prenatal care for normal course pregnancies be managed by trained general practitioners or nurses with specialization in maternal-perinatal care, with routine involvement of gynecologists-obstetricians not being necessary unless complications arise.\n\nBased on this information, while the initial risk assessment is clearly defined, the specific timing and responsibility for reevaluating clinical risk during the course of a normal pregnancy are not detailed in the provided context. It can be inferred that reevaluation might occur during regular prenatal visits as part of the continuous care model, but the exact timing and responsible professional are not specified. Therefore, there is not enough information to provide a detailed answer regarding the specific timing and responsible party for reevaluating clinical risk in a normal course pregnancy.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 1.0,
+            "answer_relevancy": 0.0,
+            "context_precision": 0.4166666666458333,
+            "context_recall": 0.0
+          },
+          "performance": {
+            "question": "¿En qué momento y quien debe reevaluar el riesgo clínico de una paciente con embarazo de curso normal?",
+            "execution_time": 14.379390001296997,
+            "input_tokens": 944,
+            "output_tokens": 1146,
+            "total_cost": 0.013819999999999999
+          }
+        }
+      }
+    },
+    {
+      "question_id": 2,
+      "question": "Cual es la semana ideal para iniciar los controles prenatales",
+      "ground_truth": "Se recomienda realizar el primer control prenatal en el primer trimestre, idealmente antes de la semana 10 de gestación.",
+      "rag_results": {
+        "hyde": {
+          "answer": "Based on the information provided in the medical context, the ideal time to initiate prenatal care is before the 10th week of gestation. Document 2 and Document 4 both emphasize that the first prenatal visit should ideally occur before the 10th week. Additionally, Document 5 and Document 3 support this recommendation by stating that the first prenatal control should be conducted preferably before the 12th week of pregnancy. Therefore, the consensus is that the optimal time to begin prenatal care is before the 10th week of gestation to ensure comprehensive monitoring and support throughout the pregnancy.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 0.2857142857142857,
+            "answer_relevancy": 0.8413503496499842,
+            "context_precision": 0.6791666666496875,
+            "context_recall": 1.0
+          },
+          "performance": {
+            "question": "Cual es la semana ideal para iniciar los controles prenatales",
+            "execution_time": 11.528807401657104,
+            "input_tokens": 842,
+            "output_tokens": 1047,
+            "total_cost": 0.012575000000000001
+          }
+        }
+      }
+    },
+    {
+      "question_id": 3,
+      "question": "¿Cuándo se considera inicio tardío de controles prenatales?",
+      "ground_truth": "después de la semana 16 – 18",
+      "rag_results": {
+        "hyde": {
+          "answer": "The provided medical context does not explicitly define when the initiation of prenatal care is considered \"tardío\" (late). However, it does mention the importance of early and continuous prenatal care, as well as the recommendation for a first prenatal visit to last 40 minutes, which suggests that early engagement in prenatal care is crucial.\n\nIn general medical practice, a late initiation of prenatal care is often considered when the first prenatal visit occurs after the first trimester, typically after 12-14 weeks of gestation. This is because early prenatal care is essential for monitoring the health of both the mother and the developing fetus, identifying any potential risks, and providing necessary interventions.\n\nGiven the context provided, it is clear that early and continuous prenatal care is emphasized, but the specific threshold for what constitutes a \"late\" start is not detailed in the documents. Therefore, based on general medical guidelines, a late start would typically be after the first trimester.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 0.75,
+            "answer_relevancy": 0.0,
+            "context_precision": 0.0,
+            "context_recall": 0.0
+          },
+          "performance": {
+            "question": "¿Cuándo se considera inicio tardío de controles prenatales?",
+            "execution_time": 14.39778757095337,
+            "input_tokens": 869,
+            "output_tokens": 1038,
+            "total_cost": 0.012552500000000001
+          }
+        }
+      }
+    },
+    {
+      "question_id": 4,
+      "question": "¿Cuál es la cantidad ideal de controles prenatales?",
+      "ground_truth": "se recomienda un programa de diez citas. Para una mujer multípara con un embarazo de curso normal se recomienda un programa de siete citas",
+      "rag_results": {
+        "hyde": {
+          "answer": "Based on the information provided in the medical context, the ideal number of prenatal care visits varies depending on whether the pregnant woman is experiencing her first pregnancy (nulípara) or has had previous pregnancies (multípara).\n\nFor a woman experiencing her first pregnancy (nulípara) with a normal course of pregnancy, it is recommended to have a program of ten prenatal visits. This recommendation ensures comprehensive monitoring and support throughout the pregnancy, which is crucial for the health of both the mother and the developing fetus.\n\nFor a woman who has had previous pregnancies (multípara) and is experiencing a normal course of pregnancy, a program of seven prenatal visits is recommended. This slightly reduced number of visits takes into account the woman's previous experience with pregnancy while still providing adequate monitoring and care.\n\nIt is important to note that a reduced number of prenatal visits is not recommended, as it is associated with an increased risk of perinatal mortality. Therefore, adhering to the recommended number of visits is crucial for ensuring the health and safety of both the mother and the baby.\n\nIn summary, the ideal number of prenatal visits is ten for a first-time mother with a normal pregnancy and seven for a mother with previous pregnancies, provided the pregnancy is progressing normally.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 0.9090909090909091,
+            "answer_relevancy": 0.835085018451276,
+            "context_precision": 0.5333333333155555,
+            "context_recall": 1.0
+          },
+          "performance": {
+            "question": "¿Cuál es la cantidad ideal de controles prenatales?",
+            "execution_time": 12.499383211135864,
+            "input_tokens": 860,
+            "output_tokens": 1005,
+            "total_cost": 0.0122
+          }
+        }
+      }
+    },
+    {
+      "question_id": 5,
+      "question": "¿Con cuál herramienta realizo la valoración de riesgo psico social en los controles prenatales?",
+      "ground_truth": "Se recomienda que las gestantes de bajo riesgo reciban en el momento de la inscripción al control prenatal, y luego en cada trimestre, una valoración de riesgo psicosocial",
+      "rag_results": {
+        "hyde": {
+          "answer": "Based on the provided medical context, the tool that is recommended for assessing psychosocial risk during prenatal care is the \"Antenatal Psychosocial Health Assessment\" (ALPHA). Document 4 specifically mentions a study comparing the ALPHA scale to routine prenatal care for detecting psychosocial risk factors. The study found that the ALPHA scale identified a greater number of psychosocial problems than routine prenatal care, with an odds ratio of 1.8 and a 95% confidence interval of 1.3 to 0. This suggests that the ALPHA scale is a more effective tool for identifying psychosocial issues in pregnant women during prenatal visits.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 0.6666666666666666,
+            "answer_relevancy": 0.8810566045958014,
+            "context_precision": 0.9166666666361111,
+            "context_recall": 1.0
+          },
+          "performance": {
+            "question": "¿Con cuál herramienta realizo la valoración de riesgo psico social en los controles prenatales?",
+            "execution_time": 13.247784852981567,
+            "input_tokens": 845,
+            "output_tokens": 926,
+            "total_cost": 0.011372500000000002
+          }
+        }
+      }
+    },
+    {
+      "question_id": 6,
+      "question": "¿Cuándo realizar la valoración de riesgo psico social en el seguimiento de una materna?",
+      "ground_truth": "Se recomienda evaluar el riesgo biológico y psicosocial a todas las gestantes mediante la escala de Herrera & Hurtado",
+      "rag_results": {
+        "hyde": {
+          "answer": "La valoración de riesgo psicosocial en el seguimiento de una materna debe realizarse de manera rutinaria durante el control prenatal. Según el contexto proporcionado, se recomienda que esta valoración se lleve a cabo en el momento de la inscripción al control prenatal y luego en cada trimestre del embarazo. Esto implica que las gestantes deben ser evaluadas al menos tres veces durante el embarazo para identificar cualquier riesgo psicosocial que pueda afectar el desenlace del embarazo.\n\nAdemás, es importante que esta evaluación incluya la identificación de factores como el estrés materno crónico, la ansiedad, los trastornos del sueño, el pobre apoyo de la red social y la depresión materna. La detección de depresión es particularmente crucial, ya que las mujeres con depresión durante el embarazo tienen un mayor riesgo de parto pretérmino y de tener bebés con bajo peso al nacer.\n\nSi se identifica algún riesgo psicosocial durante estas evaluaciones, se debe remitir a la gestante a una consulta especializada para garantizar la continuidad del cuidado con el grupo a cargo del control prenatal. Esto asegura que las necesidades específicas de la gestante sean atendidas por un equipo multidisciplinario que puede incluir profesionales de psicología, psiquiatría y ginecología, entre otros.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 1.0,
+            "answer_relevancy": 0.953440331963121,
+            "context_precision": 0.99999999998,
+            "context_recall": 0.0
+          },
+          "performance": {
+            "question": "¿Cuándo realizar la valoración de riesgo psico social en el seguimiento de una materna?",
+            "execution_time": 14.051889419555664,
+            "input_tokens": 857,
+            "output_tokens": 1170,
+            "total_cost": 0.0138425
+          }
+        }
+      }
+    },
+    {
+      "question_id": 7,
+      "question": "¿Cada cuanto se realiza el tamizaje para depresión posparto durante el embarazo?",
+      "ground_truth": "Se recomienda que, en el primer control prenatal, en la semana 28 de gestación y en la consulta de puerperio se identifique el riesgo de depresión postparto",
+      "rag_results": {
+        "hyde": {
+          "answer": "Based on the provided medical context, the screening for postpartum depression during pregnancy is recommended to be conducted on a trimester basis. Document 2 specifies that maternal depression should be identified through a screening process each trimester during prenatal care. This regular screening is important because women who experience depression during pregnancy are at a higher risk for preterm birth and low birth weight. Therefore, the screening for postpartum depression risk is conducted every trimester to ensure early identification and management of potential mental health issues.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 0.8571428571428571,
+            "answer_relevancy": 0.8811306876264796,
+            "context_precision": 0.99999999998,
+            "context_recall": 1.0
+          },
+          "performance": {
+            "question": "¿Cada cuanto se realiza el tamizaje para depresión posparto durante el embarazo?",
+            "execution_time": 10.827939987182617,
+            "input_tokens": 870,
+            "output_tokens": 1034,
+            "total_cost": 0.012515
+          }
+        }
+      }
+    },
+    {
+      "question_id": 8,
+      "question": "¿Cuál es la probabilidad de parto vaginal luego de una cesárea?",
+      "ground_truth": "La probabilidad de parto vaginal es de 74% luego de una cesárea sin otros riesgos asociados.",
+      "rag_results": {
+        "hyde": {
+          "answer": "Based on the provided medical context, the probability of a vaginal birth after cesarean (VBAC) can be influenced by several factors. The documents indicate that between 28% to 70% of women with a previous cesarean section undergo a trial of labor (PTP). However, the actual success rate of achieving a VBAC is not explicitly stated in the documents.\n\nFactors that can influence the likelihood of a successful VBAC include:\n\n1. **Previous Vaginal Birth**: Women who have had a previous vaginal birth are more likely to have a successful VBAC.\n\n2. **Fetal Weight**: A lower probability of VBAC is associated with an estimated fetal weight greater than 4,000 grams (OR= 0.62; 95% CI= 0.54-0.71).\n\n3. **Bishop Score**: A high Bishop score during labor is associated with a higher likelihood of VBAC.\n\nThe documents also mention that the maternal mortality risk is lower for those attempting a trial of labor (3.8 per 100,000) compared to those opting for an elective cesarean (13.4 per 100,000).\n\nIn summary, while the documents provide some factors that influence the likelihood of a successful VBAC, they do not provide a specific probability or success rate. The decision for a trial of labor after cesarean should be made in consultation with healthcare providers, considering individual risk factors and preferences.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 1.0,
+            "answer_relevancy": 0.0,
+            "context_precision": 0.99999999995,
+            "context_recall": 0.0
+          },
+          "performance": {
+            "question": "¿Cuál es la probabilidad de parto vaginal luego de una cesárea?",
+            "execution_time": 20.103410720825195,
+            "input_tokens": 908,
+            "output_tokens": 1304,
+            "total_cost": 0.01531
+          }
+        }
+      }
+    },
+    {
+      "question_id": 9,
+      "question": "¿Cuáles son las metas de ganancia de peso en las mujeres gestantes?",
+      "ground_truth": "Se recomienda registrar el Índice de Masa Corporal (IMC) de la gestante en la cita de inscripción al control prenatal (alrededor de la semana 10) y con base en este establecer las metas de ganancia de peso durante la gestación de acuerdo a los siguientes parámetros: • IMC < 20 kg/m2 = ganancia entre 12 a 18 Kg • IMC entre 20 y 24,9 kg/m2 = ganancia entre 10 a 13 Kg • IMC entre 25 y 29,9 kg/m2 = ganancia entre 7 a 10 Kg • IMC > 30 kg/m2 = ganancia entre 6 a 7 Kg",
+      "rag_results": {
+        "hyde": {
+          "answer": "Las metas de ganancia de peso durante la gestación se establecen en función del Índice de Masa Corporal (IMC) de la gestante al momento de la inscripción al control prenatal, que generalmente ocurre alrededor de la semana 10 de gestación. Las recomendaciones específicas son las siguientes:\n\n1. **IMC < 20 kg/m²**: Se recomienda una ganancia de peso total entre 12 a 18 kg. Además, debido al alto riesgo de parto pretérmino, se aconseja remitir a estas gestantes a un plan de manejo nutricional específico.\n\n2. **IMC entre 20 y 24,9 kg/m²**: La ganancia de peso recomendada es entre 10 a 13 kg.\n\n3. **IMC entre 25 y 29,9 kg/m²**: Se sugiere una ganancia de peso entre 7 a 10 kg.\n\n4. **IMC > 30 kg/m²**: La ganancia de peso recomendada es entre 6 a 7 kg.\n\nEs importante realizar un seguimiento de la ganancia de peso en cada control prenatal. Si se detecta una ganancia inadecuada a las 28 semanas, se debe continuar el control bajo la supervisión de un equipo multidisciplinario especializado. No se recomiendan orientaciones nutricionales dirigidas a bajar de peso durante la gestación.\n\nEl estado nutricional de la gestante está directamente relacionado con los resultados del embarazo. Las gestantes con bajo peso tienen un mayor riesgo de tener fetos con restricción de crecimiento intrauterino y recién nacidos de bajo peso, mientras que las gestantes con sobrepeso u obesidad tienen un mayor riesgo de desarrollar diabetes, hipertensión y macrosomía fetal. Por lo tanto, uno de los objetivos del control prenatal es ofrecer educación y asesoría para garantizar una ganancia de peso adecuada durante el embarazo.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 1.0,
+            "answer_relevancy": 0.957218861809133,
+            "context_precision": 0.94999999997625,
+            "context_recall": 1.0
+          },
+          "performance": {
+            "question": "¿Cuáles son las metas de ganancia de peso en las mujeres gestantes?",
+            "execution_time": 17.417898416519165,
+            "input_tokens": 1003,
+            "output_tokens": 1323,
+            "total_cost": 0.0157375
+          }
+        }
+      }
+    },
+    {
+      "question_id": 10,
+      "question": "Cual es el tratamiento para las nauseas y vomito del embarazo",
+      "ground_truth": "A juicio del médico tratante, las intervenciones recomendadas para la reducción de la náusea y el vómito incluyen el jengibre, los antihistamínicos y la vitamina B6",
+      "rag_results": {
+        "hyde": {
+          "answer": "El tratamiento para las náuseas y vómitos durante el embarazo, especialmente en la primera mitad, incluye tanto intervenciones no farmacológicas como farmacológicas. Según la información proporcionada en los documentos, las siguientes son las recomendaciones basadas en evidencia:\n\n1. **Intervenciones No Farmacológicas:**\n   - **Jengibre:** Se ha evaluado en un ensayo clínico controlado (ECC) con 70 pacientes, donde se administró jengibre (250 mg cuatro veces al día) y se encontró que es eficaz en el tratamiento de las náuseas y vómitos en comparación con un placebo.\n   - **Cambios en el Hábito Alimenticio:** Aunque no se detallan en los documentos, los cambios en la dieta son una recomendación común para mejorar los síntomas.\n   - **Acupuntura:** También se menciona como una intervención no farmacológica eficaz.\n\n2. **Intervenciones Farmacológicas:**\n   - **Antihistamínicos:** Han demostrado ser eficaces y seguros para el tratamiento de las náuseas y vómitos. Un estudio con 7 ECC y 1.190 pacientes mostró una mejoría significativa en las náuseas con el uso de antihistamínicos (RR= 0,34; IC 95%= 0,27–0,43). Sin embargo, se asocian con un aumento de la somnolencia (OR=2,19; IC 95%= 1,09-4,37).\n   - **Vitamina B6 (Piridoxina):** También se recomienda como tratamiento, y se ha encontrado que reduce las náuseas en comparación con placebo o ningún tratamiento.\n\nEs importante informar a las mujeres embarazadas que la mayoría de los casos de náuseas y vómitos se resuelven espontáneamente antes de la semana 16 a 20 de gestación y que generalmente no están asociados con resultados adversos del embarazo.",
+          "contexts_count": 1,
+          "metrics": {
+            "faithfulness": 0.9285714285714286,
+            "answer_relevancy": 0.8996689570752974,
+            "context_precision": 0.99999999998,
+            "context_recall": 1.0
+          },
+          "performance": {
+            "question": "Cual es el tratamiento para las nauseas y vomito del embarazo",
+            "execution_time": 20.14697790145874,
+            "input_tokens": 961,
+            "output_tokens": 1314,
+            "total_cost": 0.015542500000000002
+          }
+        }
+      }
+    }
+  ]
+}
