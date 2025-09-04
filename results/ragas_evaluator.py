@@ -50,11 +50,11 @@ DATA_GT = [
     },
     {
         "question": "¿Con cuál herramienta realizo la valoración de riesgo psico social en los controles prenatales?",
-        "ground_truth": "Se recomienda que las gestantes de bajo riesgo reciban en el momento de la inscripción al control prenatal, y luego en cada trimestre, una valoración de riesgo psicosocial"
+        "ground_truth": "Se recomienda evaluar el riesgo biológico y psicosocial a todas las gestantes mediante la escala de Herrera & Hurtado"
     },
     {
         "question": "¿Cuándo realizar la valoración de riesgo psico social en el seguimiento de una materna?",
-        "ground_truth": "Se recomienda evaluar el riesgo biológico y psicosocial a todas las gestantes mediante la escala de Herrera & Hurtado"
+        "ground_truth": "Se recomienda que las gestantes de bajo riesgo reciban en el momento de la inscripción al control prenatal, y luego en cada trimestre, una valoración de riesgo psicosocial"
     },
     {
         "question": "¿Cada cuanto se realiza el tamizaje para depresión posparto durante el embarazo?",
@@ -472,7 +472,7 @@ class RAGASEvaluator:
         save a consolidated JSON report.
         """
         if models_to_test is None:
-            models_to_test = ["gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini", "gpt-4"]
+            models_to_test = ["gpt-5", "gpt-5-nano", "gpt-4.1", "gpt-4.1-nano"]
 
         print(f"Starting multi-model evaluation for RAG type: '{self.rag_type}'")
         print(f"Models to be tested: {models_to_test}")
@@ -1013,7 +1013,7 @@ def run_all_models_all_rags_evaluation(export_analysis: bool = False, debug: boo
     Evaluate ALL RAG types against ALL LLM models and save a consolidated JSON report.
     """
     rag_types = ["simple", "hybrid", "hyde", "rewriter"]
-    models_to_test = ["gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini", "gpt-4"]
+    models_to_test = ["gpt-5", "gpt-5-nano", "gpt-4.1", "gpt-4.1-nano"]
 
     print("🚀 Starting comprehensive evaluation: ALL RAGs vs ALL Models")
     print(f"RAG types to evaluate: {rag_types}")
