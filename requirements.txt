@@ -1,4 +1,3 @@
-# Core dependencies
 langchain
 langchain-community
 langchain-openai
@@ -6,43 +5,16 @@ langchain-weaviate
 openai
 tiktoken
 
-# Vector databases and search
-weaviate-client
-# faiss-cpu
-# pinecone-client>=3.0.0
-
-# Graph processing (for Graph RAG)
-# networkx>=3.2.1
-# neo4j>=5.15.0
-# pyvis>=0.3.2
-
 # Data processing
 pandas
 numpy
 PyPDF2
 PyMuPDF
-# scikit-learn
-
-# Text processing and embeddings
-# sentence-transformers>=2.2.2
-# transformers>=4.36.0
-# torch>=2.1.2
-
-# Evaluation metrics
-# rouge-score>=0.1.2
-# bert-score>=0.3.13
-# sacrebleu>=2.3.1
 
 # Utilities
 python-dotenv
 pydantic
 tqdm
-# loguru
-
-# API and web
-# fastapi>=0.104.1
-# uvicorn>=0.24.0
-# streamlit>=1.29.0
 
 # Testing
 pytest
