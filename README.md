@@ -1,17 +1,114 @@
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/NicolasHoyosDevs/RAG-Benchmark)
-
-# RAG Benchmark System
+<div align="center">
+  <h1> 🚀 RAG Benchmark System</h1>
+  <img src="public/4-rags.png" width="900" alt="RAG Architectures Overview" />
+  <br><br>
+  <span style="zoom:1.3;">
+    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8%2B-blue.svg" alt="Python Version" /></a>
+    <a href="https://openai.com/"><img src="https://img.shields.io/badge/OpenAI-API-412991.svg" alt="OpenAI" /></a>
+    <a href="https://langchain.com/"><img src="https://img.shields.io/badge/🦜_LangChain-Framework-green.svg" alt="LangChain" /></a>
+    <a href="https://github.com/explodinggradients/ragas"><img src="https://img.shields.io/badge/RAGAS-Evaluation-orange.svg" alt="RAGAS" /></a>
+    <!-- <a href="https://github.com/NicolasHoyosDevs/RAG-Benchmark/issues"><img src="https://img.shields.io/github/issues/NicolasHoyosDevs/RAG-Benchmark" alt="GitHub Issues" /></a>
+    <a href="https://github.com/NicolasHoyosDevs/RAG-Benchmark/stargazers"><img src="https://img.shields.io/github/stars/NicolasHoyosDevs/RAG-Benchmark" alt="GitHub Stars" /></a>
+    <a href="https://github.com/NicolasHoyosDevs/RAG-Benchmark/network/members"><img src="https://img.shields.io/github/forks/NicolasHoyosDevs/RAG-Benchmark" alt="GitHub Forks" /></a> -->
+  </span>
+</div>
 
 A comprehensive benchmarking framework for evaluating Retrieval-Augmented Generation (RAG) systems using RAGAS metrics. This project implements and compares multiple RAG architectures including Simple Semantic RAG, Hybrid RAG (BM25 + Semantic), HyDE RAG, and Query Rewriter RAG.
 
+---
+
+*Evaluate and compare multiple RAG architectures with comprehensive RAGAS metrics*
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+- [Project Structure](#project-structure)
+- [RAG Architectures](#rag-architectures)
+- [Evaluation Metrics](#evaluation-metrics)
+- [Usage](#usage)
+- [Results and Analysis](#results-and-analysis)
+- [Configuration](#configuration)
+- [Customization](#customization)
+- [Contributing](#contributing)
+- [License](#license)
+
+
 ## Overview
 
-This project provides a complete pipeline for:
-- **Data Processing**: Text chunking, embedding creation, and vector storage
-- **RAG Implementation**: Four different RAG architectures
-- **Evaluation**: Comprehensive evaluation using RAGAS framework
-- **Comparison**: Automated comparison across different models and architectures
-- **Visualization**: Results analysis and reporting
+RAG Benchmark System is a professional-grade benchmarking framework designed to evaluate and compare Retrieval-Augmented Generation (RAG) systems using industry-standard RAGAS metrics. Este proyecto implementa cuatro arquitecturas RAG distintas y provee herramientas de evaluación completas.
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant RAG_System
+  participant Vector_DB
+  participant LLM
+  participant RAGAS
+
+  User->>RAG_System: Submit Query
+  RAG_System->>Vector_DB: Retrieve Relevant Context
+  Vector_DB-->>RAG_System: Return Top-K Chunks
+  RAG_System->>LLM: Generate Answer with Context
+  LLM-->>RAG_System: Return Generated Answer
+  RAG_System-->>User: Deliver Answer
+  RAG_System->>RAGAS: Evaluate Performance
+  RAGAS->>RAGAS: Calculate Metrics
+  RAGAS-->>User: Return Evaluation Scores
+```
+
+### Key Capabilities
+
+- **Comprehensive Evaluation**: RAGAS metric-based evaluation with multiple GPT model support
+- **Multiple Architectures**: Simple Semantic RAG, Hybrid RAG (BM25 + Semantic), HyDE RAG, Query Rewriter RAG
+- **Complete Pipeline**: Data processing, embedding creation, vector storage, and automated evaluation
+- **Advanced Analysis**: Performance comparison, model benchmarking, and JSON result exports
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.8+
+- OpenAI API key
+- Git
+
+### Installation
+
+1. Clone the repository
+```bash
+git clone https://github.com/NicolasHoyosDevs/RAG-Benchmark.git
+cd RAG-Benchmark
+```
+
+2. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+3. Configure environment
+
+Create a `.env` file in the root directory:
+```bash
+OPENAI_API_KEY=your_openai_api_key_here
+```
+
+4. Create embeddings
+```bash
+cd Data/embeddings
+python create_embeddings.py
+```
+
+This will:
+- Load text chunks from `Data/chunks/chunks_final.json`
+- Create embeddings using OpenAI's text-embedding-3-small
+- Store them in ChromaDB at `Data/embeddings/chroma_db/`
+
+5. Run evaluation
+```bash
+cd ../..
+python results/ragas_evaluator.py hybrid
+```
 
 ## Project Structure
 
@@ -26,116 +123,67 @@ RAG-Benchmark/
 │   │   ├── test_retrieval.py    # Test retrieval functionality
 │   │   ├── view_embeddings.py   # View embedding data
 │   │   └── chroma_db/          # ChromaDB vector database
-│   └── parsed_docs/            # Parsed document files
-├── Simple_Semantic_RAG/        # Simple semantic search RAG
+│   └── parsed_docs/             # Parsed document files
+├── Simple_Semantic_RAG/         # Simple semantic search RAG
 │   └── simple_semantic_rag.py
-├── Hybrid_RAG/                 # Hybrid BM25 + Semantic RAG
+├── Hybrid_RAG/                  # Hybrid BM25 + Semantic RAG
 │   └── hybrid_langchain_bm25.py
-├── HyDE_RAG/                   # Hypothetical Document Embeddings RAG
+├── HyDE_RAG/                    # Hypothetical Document Embeddings RAG
 │   └── hyde_rag.py
-├── Query_Rewriter_RAG/         # Query rewriting RAG
+├── Query_Rewriter_RAG/          # Query rewriting RAG
 │   └── main_rewriter.py
-├── results/                    # Evaluation results and analysis
-│   ├── ragas_evaluator.py      # Main evaluation script
-│   ├── utils.py                # Utility functions
-│   ├── ragas_analysis/         # Analysis tools and reports
-│   └── [JSON files]            # Evaluation results
-├── benchmark_ragas.py          # Benchmark script
-├── test_comparison.py          # Comparison testing
-├── requirements.txt            # Python dependencies
-└── README.md                   # This file
+├── results/                     # Evaluation results and analysis
+│   ├── ragas_evaluator.py       # Main evaluation script
+│   ├── utils.py                 # Utility functions
+│   ├── ragas_analysis/          # Analysis tools and reports
+│   └── [JSON files]             # Evaluation results
+├── benchmark_ragas.py           # Benchmark script
+├── test_comparison.py           # Comparison testing
+├── requirements.txt             # Python dependencies
+└── README.md                    # This file
 ```
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.8+
-- OpenAI API key
-- Git
-
-### 1. Clone and Setup
-
-```bash
-git clone https://github.com/NicolasHoyosDevs/RAG-Benchmark.git
-cd RAG-Benchmark
-```
-
-### 2. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configure Environment
-
-Create a `.env` file in the root directory:
-
-```bash
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-### 4. Prepare Data
-
-#### Option A: Use Existing Data
-The project includes pre-processed data. Skip to step 5.
-
-#### Option B: Process New Data
-If you want to process your own documents:
-
-1. Place your documents in `Data/raw/`
-2. Run the preprocessing pipeline (if available)
-3. Create chunks and embeddings
-
-### 5. Create Embeddings
-
-```bash
-cd Data/embeddings
-python create_embeddings.py
-```
-
-This will:
-- Load text chunks from `Data/chunks/chunks_final.json`
-- Create embeddings using OpenAI's text-embedding-3-small
-- Store them in ChromaDB at `Data/embeddings/chroma_db/`
 
 ## RAG Architectures
+
+This project implements four distinct RAG architectures:
 
 ### 1. Simple Semantic RAG
 - Uses semantic similarity search
 - Direct retrieval from vector database
 - Fast and straightforward approach
+- Best for: Simple, direct queries
 
 ### 2. Hybrid RAG (BM25 + Semantic)
 - Combines BM25 keyword search with semantic search
 - Better retrieval accuracy for diverse queries
 - Balances precision and recall
+- Best for: Mixed keyword and semantic queries
 
 ### 3. HyDE RAG (Hypothetical Document Embeddings)
-- Generates hypothetical documents for the query
+- Generates hypothetical documents for queries
 - Uses embeddings of hypothetical content for retrieval
 - Effective for complex or abstract queries
+- Best for: Abstract or conceptual questions
 
 ### 4. Query Rewriter RAG
 - Rewrites queries in multiple ways
-- Performs multiple retrievals with different query formulations
+- Performs multiple retrievals with different formulations
 - Improves results for ambiguous queries
+- Best for: Ambiguous or multi-faceted questions
 
-## Evaluation with RAGAS
+## Evaluation Metrics
 
 The system uses RAGAS (Retrieval-Augmented Generation Assessment) for comprehensive evaluation:
 
-### Metrics Evaluated:
-- **Faithfulness**: How well the response matches the retrieved context
-- **Answer Relevancy**: How relevant the answer is to the question
-- **Context Precision**: Precision of retrieved context
-- **Context Recall**: Recall of retrieved context
+Metrics Evaluated:
+- Faithfulness: How well the response matches the retrieved context
+- Answer Relevancy: How relevant the answer is to the question
+- Context Precision: Precision of retrieved context
+- Context Recall: Recall of retrieved context
 
-## Available Commands
+## Usage
 
 ### Individual RAG Evaluation
-
-Evaluate each RAG system individually:
 
 ```bash
 # Simple Semantic RAG
@@ -153,8 +201,6 @@ python results/ragas_evaluator.py rewriter
 
 ### Multi-Model Evaluation
 
-Evaluate a specific RAG with multiple models:
-
 ```bash
 # Evaluate Hybrid RAG with all models
 python results/ragas_evaluator.py multi-model hybrid
@@ -164,8 +210,6 @@ python results/ragas_evaluator.py multi-model simple
 ```
 
 ### Comprehensive Evaluation
-
-Evaluate all RAGs with all models in a single run:
 
 ```bash
 python results/ragas_evaluator.py all-models-all-rags
@@ -204,7 +248,7 @@ Results are saved in the `results/` directory as JSON files:
 
 ### JSON Output Structure
 
-#### Individual RAG Evaluation JSON Structure
+#### Individual RAG Evaluation
 ```json
 {
   "metadata": {
@@ -220,135 +264,20 @@ Results are saved in the `results/` directory as JSON files:
     "context_precision": 0.92,
     "context_recall": 0.76
   },
-  "question_by_question": [
-    {
-      "question": "What are the main stages of pregnancy?",
-      "ground_truth": "Pregnancy is divided into three trimesters...",
-      "answer": "Pregnancy consists of three main trimesters...",
-      "contexts": ["Pregnancy is divided into...", "First trimester includes..."],
-      "faithfulness": 0.88,
-      "answer_relevancy": 0.82,
-      "context_precision": 0.95,
-      "context_recall": 0.79
-    }
-  ]
+  "question_by_question": [...]
 }
 ```
-
-#### Comprehensive All-Models-All-RAGs JSON Structure
-```json
-{
-  "metadata": {
-    "evaluation_type": "all-models-all-rags",
-    "timestamp": "20250830_181136",
-    "total_evaluations": 16,
-    "total_questions": 5,
-    "models_tested": ["gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini", "gpt-4"],
-    "rags_tested": ["simple", "hybrid", "hyde", "rewriter"]
-  },
-  "summary": {
-    "best_performing_rag": "hybrid",
-    "best_performing_model": "gpt-4",
-    "highest_faithfulness": 0.89,
-    "highest_answer_relevancy": 0.84
-  },
-  "rag_results": {
-    "simple": {
-      "gpt-3.5-turbo": {
-        "faithfulness": 0.78,
-        "answer_relevancy": 0.72,
-        "context_precision": 0.85,
-        "context_recall": 0.69
-      },
-      "gpt-4o": {
-        "faithfulness": 0.82,
-        "answer_relevancy": 0.76,
-        "context_precision": 0.88,
-        "context_recall": 0.73
-      }
-    },
-    "hybrid": {
-      "gpt-3.5-turbo": {
-        "faithfulness": 0.85,
-        "answer_relevancy": 0.79,
-        "context_precision": 0.91,
-        "context_recall": 0.75
-      },
-      "gpt-4o": {
-        "faithfulness": 0.89,
-        "answer_relevancy": 0.84,
-        "context_precision": 0.94,
-        "context_recall": 0.81
-      }
-    },
-    "hyde": {
-      "gpt-3.5-turbo": {
-        "faithfulness": 0.81,
-        "answer_relevancy": 0.77,
-        "context_precision": 0.87,
-        "context_recall": 0.71
-      }
-    },
-    "rewriter": {
-      "gpt-3.5-turbo": {
-        "faithfulness": 0.83,
-        "answer_relevancy": 0.78,
-        "context_precision": 0.89,
-        "context_recall": 0.74
-      }
-    }
-  },
-  "detailed_results": {
-    "simple_gpt-3.5-turbo": {
-      "metadata": {
-        "rag_type": "simple",
-        "model_used": "gpt-3.5-turbo",
-        "timestamp": "20250830_181136"
-      },
-      "question_by_question": [...]
-    }
-  }
-}
-```
-
-#### Key JSON Fields Explained
-
-- **`metadata`**: Contains evaluation information (RAG type, model used, timestamp, etc.)
-- **`rag_results`**: Aggregated metrics for the evaluation
-- **`question_by_question`**: Detailed results for each test question including:
-  - Original question
-  - Ground truth answer
-  - Generated answer
-  - Retrieved contexts
-  - Individual metric scores
-- **`summary`**: Overview of best performers (in comprehensive evaluations)
-- **`detailed_results`**: Complete breakdown by RAG-model combination
-
-#### Metrics Description
-- **Faithfulness** (0-1): How well the answer matches the retrieved context
-- **Answer Relevancy** (0-1): How relevant the answer is to the question
-- **Context Precision** (0-1): Precision of the retrieved context chunks
-- **Context Recall** (0-1): How well the context covers the ground truth
-
-### Analysis Tools
-Use the analysis tools in `results/ragas_analysis/`:
-- View detailed metrics
-- Compare performance across RAGs and models
-- Generate reports and visualizations
 
 ## Configuration
 
 ### Environment Variables
 - `OPENAI_API_KEY`: Your OpenAI API key (required)
 
-### Model Configuration
-The system supports these OpenAI models:
+### Supported Models
 - gpt-3.5-turbo
 - gpt-4o
 - gpt-4o-mini
 - gpt-4
-
-Models are automatically switched during multi-model evaluations.
 
 ## Customization
 
@@ -367,20 +296,6 @@ Edit the respective RAG files:
 
 ### Custom Evaluation Metrics
 Modify `results/ragas_evaluator.py` to add custom metrics or evaluation logic.
-
-## Documentation
-
-### Data Processing
-- Documents are chunked and stored as JSON
-- Embeddings are created using OpenAI's embedding models
-- Vector database uses ChromaDB for efficient similarity search
-
-### RAG Implementation Details
-Each RAG architecture is implemented as a separate module with:
-- Document ingestion
-- Query processing
-- Retrieval logic
-- Response generation
 
 ## Contributing
 
