@@ -1,5 +1,0 @@
-rag_name,rag_type,dataset_size,timestamp,faithfulness,answer_relevancy,context_precision,context_recall,overall_average_score,avg_execution_time,total_input_tokens,total_output_tokens,total_cost,avg_cost_per_question,total_tokens,cost_per_token
-HyDE RAG (Hypothetical Documents),hyde,10,2025-08-29T16:41:20.537528,0.8855,0.8547,0.8172,0.7,0.814,9.869,9744,8492,0.054523,0.005452,18236,2.99e-06
-Simple Semantic RAG,simple,10,2025-08-29T16:41:20.537528,0.9506,0.855,0.7415,0.7,0.812,3.926,7677,2002,0.039212,0.003921,9679,4.05e-06
-Hybrid RAG (BM25 + Semantic),hybrid,10,2025-08-29T16:41:20.537528,0.8392,0.8471,0.626,0.7,0.753,5.424,9331,2627,0.049598,0.00496,11958,4.15e-06
-Rewriter RAG (Multi-Query),rewriter,10,2025-08-29T16:41:20.537528,0.8778,0.7476,0.6655,0.7,0.748,7.188,3647,2047,0.004894,0.000489,5694,8.6e-07
