@@ -95,50 +95,35 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 4. Create embeddings
 ```bash
-cd Data/embeddings
-python create_embeddings.py
+python scripts/create_embeddings.py
 ```
 
 This will:
-- Load text chunks from `Data/chunks/chunks_final.json`
+- Load text chunks from `data/chunks/chunks_final.json`
 - Create embeddings using OpenAI's text-embedding-3-small
-- Store them in ChromaDB at `Data/embeddings/chroma_db/`
+- Store them in ChromaDB at `data/embeddings/chroma_db/`
 
 5. Run evaluation
 ```bash
-cd ../..
-python results/ragas_evaluator.py hybrid
+python scripts/run_evaluation.py hybrid
 ```
 
 ## Project Structure
 
 ```
 RAG-Benchmark/
-├── Data/
+├── src/
+│   ├── rag/                     # RAG implementations (simple, hybrid, hyde, rewriter)
+│   └── evaluation/              # RAGAS orchestration and reports
+├── scripts/                     # CLI entrypoints (evaluation + embeddings)
+├── data/
 │   ├── raw/                     # Raw documents
 │   ├── processed/               # Processed documents
 │   ├── chunks/                  # Text chunks (JSON)
-│   ├── embeddings/              # Embedding creation and storage
-│   │   ├── create_embeddings.py # Create embeddings script
-│   │   ├── test_retrieval.py    # Test retrieval functionality
-│   │   ├── view_embeddings.py   # View embedding data
-│   │   └── chroma_db/          # ChromaDB vector database
-│   └── parsed_docs/             # Parsed document files
-├── Simple_Semantic_RAG/         # Simple semantic search RAG
-│   └── simple_semantic_rag.py
-├── Hybrid_RAG/                  # Hybrid BM25 + Semantic RAG
-│   └── hybrid_langchain_bm25.py
-├── HyDE_RAG/                    # Hypothetical Document Embeddings RAG
-│   └── hyde_rag.py
-├── Query_Rewriter_RAG/          # Query rewriting RAG
-│   └── main_rewriter.py
-├── results/                     # Evaluation results and analysis
-│   ├── ragas_evaluator.py       # Main evaluation script
-│   ├── utils.py                 # Utility functions
-│   ├── ragas_analysis/          # Analysis tools and reports
-│   └── [JSON files]             # Evaluation results
-├── benchmark_ragas.py           # Benchmark script
-├── test_comparison.py           # Comparison testing
+│   └── embeddings/              # ChromaDB persistent store
+├── results/                     # Evaluation outputs (JSON)
+├── docs/                        # Architecture and guides
+├── config/                      # Project configuration files
 ├── requirements.txt             # Python dependencies
 └── README.md                    # This file
 ```
@@ -187,32 +172,32 @@ Metrics Evaluated:
 
 ```bash
 # Simple Semantic RAG
-python results/ragas_evaluator.py simple
+python scripts/run_evaluation.py simple
 
 # Hybrid RAG
-python results/ragas_evaluator.py hybrid
+python scripts/run_evaluation.py hybrid
 
 # HyDE RAG
-python results/ragas_evaluator.py hyde
+python scripts/run_evaluation.py hyde
 
 # Query Rewriter RAG
-python results/ragas_evaluator.py rewriter
+python scripts/run_evaluation.py rewriter
 ```
 
 ### Multi-Model Evaluation
 
 ```bash
 # Evaluate Hybrid RAG with all models
-python results/ragas_evaluator.py multi-model hybrid
+python scripts/run_evaluation.py multi-model hybrid
 
 # Evaluate Simple RAG with all models
-python results/ragas_evaluator.py multi-model simple
+python scripts/run_evaluation.py multi-model simple
 ```
 
 ### Comprehensive Evaluation
 
 ```bash
-python results/ragas_evaluator.py all-models-all-rags
+python scripts/run_evaluation.py all-models-all-rags
 ```
 
 This command will:
@@ -231,12 +216,10 @@ python benchmark_ragas.py
 python test_comparison.py
 
 # View embedding data
-cd Data/embeddings
-python view_embeddings.py
+python scripts/view_embeddings.py
 
 # Test retrieval functionality
-cd Data/embeddings
-python test_retrieval.py
+python scripts/test_retrieval.py
 ```
 
 ## Results and Analysis
@@ -282,20 +265,20 @@ Results are saved in the `results/` directory as JSON files:
 ## Customization
 
 ### Adding New Documents
-1. Place documents in `Data/raw/`
+1. Place documents in `data/raw/`
 2. Process them into chunks
-3. Update `Data/chunks/chunks_final.json`
+3. Update `data/chunks/chunks_final.json`
 4. Re-run embedding creation
 
 ### Modifying RAG Parameters
 Edit the respective RAG files:
-- `Simple_Semantic_RAG/simple_semantic_rag.py`
-- `Hybrid_RAG/hybrid_langchain_bm25.py`
-- `HyDE_RAG/hyde_rag.py`
-- `Query_Rewriter_RAG/main_rewriter.py`
+- `src/rag/simple.py`
+- `src/rag/hybrid.py`
+- `src/rag/hyde.py`
+- `src/rag/rewriter.py`
 
 ### Custom Evaluation Metrics
-Modify `results/ragas_evaluator.py` to add custom metrics or evaluation logic.
+Modify `src/evaluation/ragas_evaluator.py` to add custom metrics or evaluation logic.
 
 ## Contributing
 
@@ -319,7 +302,7 @@ This project is licensed under the MIT License. See `LICENSE` for details.
 
 ```python
 # Example: Evaluate Hybrid RAG
-from results.ragas_evaluator import RAGASEvaluator
+from src.evaluation.ragas_evaluator import RAGASEvaluator
 
 evaluator = RAGASEvaluator()
 results = evaluator.evaluate_rag("hybrid", "gpt-4o")

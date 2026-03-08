@@ -10,28 +10,29 @@ an answer based on the combined, re-ranked results.
 import os
 import time
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.documents import Document
+from langchain_core.language_models import BaseChatModel
 
 # --- Environment and Path Configuration ---
 
 # Load environment variables from .env file
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 if not os.getenv("OPENAI_API_KEY"):
     raise ValueError("OPENAI_API_KEY not found in the .env file")
 
 # --- ChromaDB Configuration ---
-DB_DIRECTORY = Path(__file__).resolve().parent.parent / \
-    "Data" / "embeddings" / "chroma_db"
+DB_DIRECTORY = PROJECT_ROOT / "data" / "embeddings" / "chroma_db"
 COLLECTION_NAME = "guia_embarazo_parto"
 
 # --- Model and Vector Store Configuration ---
@@ -223,7 +224,7 @@ def process_rewriter_query(question: str, custom_rewriter_llm: ChatOpenAI = None
     }
 
 
-def query_for_evaluation(question: str, rewriter_model: str = None, answer_model: str = None) -> dict:
+def query_for_evaluation(question: str, rewriter_model: str = None, answer_model: str = None, custom_rewriter_llm: Optional[BaseChatModel] = None, custom_answer_llm: Optional[BaseChatModel] = None) -> dict:
     """
     A wrapper function for RAG evaluation frameworks like Ragas.
 
@@ -234,17 +235,32 @@ def query_for_evaluation(question: str, rewriter_model: str = None, answer_model
         question (str): The question to process.
         rewriter_model (str, optional): The name of the LLM model to use for query rewriting.
         answer_model (str, optional): The name of the LLM model to use for answer generation.
+        custom_rewriter_llm (BaseChatModel, optional): Pre-configured LLM for rewriting. Takes precedence over rewriter_model.
+        custom_answer_llm (BaseChatModel, optional): Pre-configured LLM for answer. Takes precedence over answer_model.
     """
-    # Create custom LLMs if models are specified
-    custom_rewriter_llm = ChatOpenAI(model_name=rewriter_model, temperature=0.3) if rewriter_model else None
-    custom_answer_llm = ChatOpenAI(model_name=answer_model, temperature=0) if answer_model else None
+    # Create custom LLMs if provided, or fall back to string model names or defaults
+    if custom_rewriter_llm:
+        final_rewriter_llm = custom_rewriter_llm
+        used_rewriter_model = "custom"
+    elif rewriter_model:
+        final_rewriter_llm = ChatOpenAI(model_name=rewriter_model, temperature=0.3)
+        used_rewriter_model = rewriter_model
+    else:
+        final_rewriter_llm = None
+        used_rewriter_model = "gpt-3.5-turbo"
     
-    # Track which models are being used
-    used_rewriter_model = rewriter_model if rewriter_model else "gpt-3.5-turbo"
-    used_answer_model = answer_model if answer_model else "gpt-4o"
+    if custom_answer_llm:
+        final_answer_llm = custom_answer_llm
+        used_answer_model = "custom"
+    elif answer_model:
+        final_answer_llm = ChatOpenAI(model_name=answer_model, temperature=0)
+        used_answer_model = answer_model
+    else:
+        final_answer_llm = None
+        used_answer_model = "gpt-4o"
     
     start_time = time.time()
-    result = process_rewriter_query(question, custom_rewriter_llm, custom_answer_llm)
+    result = process_rewriter_query(question, final_rewriter_llm, final_answer_llm)
     end_time = time.time()
     execution_time = end_time - start_time
 

@@ -11,27 +11,28 @@ accuracy by searching for a more detailed document rather than a short query.
 import os
 import time
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_community.callbacks import get_openai_callback
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.language_models import BaseChatModel
 
 # --- Environment and Path Configuration ---
 
 # Load environment variables from .env file
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 if not os.getenv("OPENAI_API_KEY"):
     raise ValueError("OPENAI_API_KEY not found in the .env file")
 
 # Define paths
-script_dir = Path(__file__).resolve().parent
-chroma_db_dir = script_dir.parent / "Data" / "embeddings" / "chroma_db"
+chroma_db_dir = PROJECT_ROOT / "data" / "embeddings" / "chroma_db"
 collection_name = "guia_embarazo_parto"
 
 # --- Model and Vector Store Configuration ---
@@ -205,7 +206,7 @@ def process_hyde_query(query: str, custom_hyde_llm: ChatOpenAI = None, custom_an
     }
 
 
-def query_for_evaluation(question: str, hyde_model: str = None, answer_model: str = None) -> dict:
+def query_for_evaluation(question: str, hyde_model: str = None, answer_model: str = None, custom_hyde_llm: Optional[BaseChatModel] = None, custom_answer_llm: Optional[BaseChatModel] = None) -> dict:
     """
     A wrapper function for RAG evaluation frameworks like Ragas.
 
@@ -216,20 +217,35 @@ def query_for_evaluation(question: str, hyde_model: str = None, answer_model: st
         question (str): The question to process.
         hyde_model (str, optional): The name of the LLM model to use for HyDE generation.
         answer_model (str, optional): The name of the LLM model to use for answer generation.
+        custom_hyde_llm (BaseChatModel, optional): Pre-configured LLM for HyDE. Takes precedence over hyde_model.
+        custom_answer_llm (BaseChatModel, optional): Pre-configured LLM for answer. Takes precedence over answer_model.
 
     Returns:
         dict: A dictionary containing the question, answer, contexts, and metadata.
     """
-    # Create custom LLMs if models are specified
-    custom_hyde_llm = ChatOpenAI(model_name=hyde_model, temperature=0.7) if hyde_model else None
-    custom_answer_llm = ChatOpenAI(model_name=answer_model, temperature=0) if answer_model else None
+    # Create custom LLMs if provided, or fall back to string model names or defaults
+    if custom_hyde_llm:
+        final_hyde_llm = custom_hyde_llm
+        used_hyde_model = "custom"
+    elif hyde_model:
+        final_hyde_llm = ChatOpenAI(model_name=hyde_model, temperature=0.7)
+        used_hyde_model = hyde_model
+    else:
+        final_hyde_llm = None
+        used_hyde_model = "gpt-3.5-turbo"
     
-    # Track which models are being used
-    used_hyde_model = hyde_model if hyde_model else "gpt-3.5-turbo"
-    used_answer_model = answer_model if answer_model else "gpt-4o"
+    if custom_answer_llm:
+        final_answer_llm = custom_answer_llm
+        used_answer_model = "custom"
+    elif answer_model:
+        final_answer_llm = ChatOpenAI(model_name=answer_model, temperature=0)
+        used_answer_model = answer_model
+    else:
+        final_answer_llm = None
+        used_answer_model = "gpt-4o"
     
     start_time = time.time()
-    result = process_hyde_query(question, custom_hyde_llm, custom_answer_llm)
+    result = process_hyde_query(question, final_hyde_llm, final_answer_llm)
     end_time = time.time()
     execution_time = end_time - start_time
 

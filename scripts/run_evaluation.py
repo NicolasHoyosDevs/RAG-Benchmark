@@ -1,4 +1,4 @@
-"""Compatibility wrapper that forwards to the new evaluation module."""
+"""Official CLI entrypoint for RAGAS benchmark evaluations."""
 
 from src.evaluation.ragas_evaluator import main
 

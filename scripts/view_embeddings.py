@@ -4,7 +4,8 @@ import json
 
 # --- CONFIGURACIÓN ---
 SCRIPT_DIR = Path(__file__).resolve().parent
-DB_DIRECTORY = SCRIPT_DIR / "chroma_db"
+PROJECT_ROOT = SCRIPT_DIR.parent
+DB_DIRECTORY = PROJECT_ROOT / "data" / "embeddings" / "chroma_db"
 COLLECTION_NAME = "guia_embarazo_parto"
 
 

@@ -10,7 +10,8 @@ load_dotenv()
 
 # Rutas (deben coincidir con las de create_embeddings.py)
 SCRIPT_DIR = Path(__file__).resolve().parent
-DB_DIRECTORY = SCRIPT_DIR / "chroma_db"
+PROJECT_ROOT = SCRIPT_DIR.parent
+DB_DIRECTORY = PROJECT_ROOT / "data" / "embeddings" / "chroma_db"
 COLLECTION_NAME = "guia_embarazo_parto"
 
 def test_database_query(query_text):

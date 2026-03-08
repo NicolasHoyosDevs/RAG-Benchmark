@@ -24,8 +24,9 @@ load_dotenv()
 # Configuration
 # Build absolute paths based on script location to avoid errors
 SCRIPT_DIR = Path(__file__).resolve().parent
-CHUNKS_FILE_PATH = SCRIPT_DIR.parent / "chunks" / "chunks_final.json"
-DB_DIRECTORY = SCRIPT_DIR / "chroma_db"
+PROJECT_ROOT = SCRIPT_DIR.parent
+CHUNKS_FILE_PATH = PROJECT_ROOT / "data" / "chunks" / "chunks_final.json"
+DB_DIRECTORY = PROJECT_ROOT / "data" / "embeddings" / "chroma_db"
 COLLECTION_NAME = "guia_embarazo_parto"
 
 
