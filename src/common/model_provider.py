@@ -99,8 +99,9 @@ def create_llm(config: ModelConfig) -> BaseChatModel:
         return ChatOpenAI(
             base_url=f"{endpoint_url}/v1",
             api_key=hf_token,
-            model_name="tgi",  # TGI expects this as the model parameter
-            temperature=config.temperature
+            model_name=config.model_id,
+            temperature=config.temperature,
+            max_tokens=512,  # Required: HF TGI models loop without a stop limit
         )
     
     else:

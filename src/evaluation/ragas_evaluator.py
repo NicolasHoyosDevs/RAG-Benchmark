@@ -625,7 +625,7 @@ def evaluate_rewriter_rag(export_analysis: bool = False, debug: bool = False):
     
     if export_analysis:
         try:
-            from utils import export_ragas_analysis
+            from src.common.utils import export_ragas_analysis
             
             performance_metadata = getattr(evaluator, 'performance_metadata', None)
             export_files = export_ragas_analysis(results, "rewriter_rag", performance_metadata=performance_metadata)
@@ -647,7 +647,7 @@ def evaluate_hybrid_rag(export_analysis: bool = False, debug: bool = False):
     
     if export_analysis:
         try:
-            from utils import export_ragas_analysis
+            from src.common.utils import export_ragas_analysis
             
             performance_metadata = getattr(evaluator, 'performance_metadata', None)
             export_files = export_ragas_analysis(results, "hybrid_rag", performance_metadata=performance_metadata)
@@ -669,7 +669,7 @@ def evaluate_hyde_rag(export_analysis: bool = False, debug: bool = False):
     
     if export_analysis:
         try:
-            from utils import export_ragas_analysis
+            from src.common.utils import export_ragas_analysis
             
             performance_metadata = getattr(evaluator, 'performance_metadata', None)
             export_files = export_ragas_analysis(results, "hyde_rag", performance_metadata=performance_metadata)
@@ -691,7 +691,7 @@ def evaluate_simple_rag(export_analysis: bool = False, debug: bool = False):
     
     if export_analysis:
         try:
-            from utils import export_ragas_analysis
+            from src.common.utils import export_ragas_analysis
             
             performance_metadata = getattr(evaluator, 'performance_metadata', None)
             export_files = export_ragas_analysis(results, "simple_rag", performance_metadata=performance_metadata)
